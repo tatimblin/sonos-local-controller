@@ -7,4 +7,4 @@ edition = "2021"
 [dependencies]
 crossterm = "0.28.1"
 ratatui = "0.28.1"
-sdk = { path = "../sdk" }
+sonos = { path = "../sonos" }

@@ -1,7 +1,10 @@
 [package]
-name = "sdk"
+name = "sonos"
 version = "0.1.0"
 authors = []
 edition = "2021"
 
 [dependencies]
+failure = "0.1"
+regex = "1"
+lazy_static = "1"

@@ -13,9 +13,9 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::Stylize,
     symbols::border,
-    text::{Line, Text},
+    text::Text,
     widgets::{
-        block::{Position, Title},
+        block::Title,
         Block,
         Paragraph,
         Widget,
@@ -24,14 +24,10 @@ use ratatui::{
     Frame,
 };
 
-// use sdk::helloworld::HelloWorld;
-
 fn main() -> io::Result<()> {
-    // let hw = HelloWorld {
-    //     name: "Tristan".to_string(),
-    // };
-
-    // println!("{}", hw.greeting());
+    if let Err(e) = sonos::system::search() {
+        eprintln!("Error occurred during SSDP search: {}", e);
+    }
 
     let mut terminal = ratatui::init();
     let app_result = App::default().run(&mut terminal);
@@ -48,7 +44,7 @@ impl App {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
-            self.handle_events();
+            let _ = self.handle_events();
         }
         Ok(())
     }
