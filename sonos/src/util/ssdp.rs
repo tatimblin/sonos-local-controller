@@ -9,10 +9,8 @@ pub trait UdpSocketTrait {
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> std::io::Result<()>;
 }
 
-/// Implement the trait for the standard UdpSocket
 impl UdpSocketTrait for UdpSocket {
     fn send_to(&mut self, buf: &[u8], addr: &str) -> std::io::Result<usize> {
-        // Call the actual send_to method from UdpSocket
         UdpSocket::send_to(self, buf, addr)
     }
 
@@ -30,8 +28,16 @@ impl UdpSocketTrait for UdpSocket {
     }
 }
 
-/// Sends an SSDP M-SEARCH request and returns the responses as a vector of strings.
-pub fn send_ssdp_request<S: UdpSocketTrait>(socket: &mut S, host: &str, target: &str) -> std::io::Result<Vec<String>> {
+#[derive(Debug, PartialEq)]
+pub struct SsdpResponse {
+    pub location: String,
+    pub st: String,
+    pub usn: String,
+    pub friendly_name: Option<String>,
+}
+
+/// Sends an SSDP M-SEARCH request and returns the responses as a vector of SsdpResponses.
+pub fn send_ssdp_request<S: UdpSocketTrait>(socket: &mut S, host: &str, target: &str) -> std::io::Result<Vec<SsdpResponse>> {
     // Allow the socket to send and receive multicast packets
     socket.set_multicast_loop_v4(true)?;
     socket.set_read_timeout(Some(Duration::from_secs(5)))?;
@@ -59,12 +65,13 @@ pub fn send_ssdp_request<S: UdpSocketTrait>(socket: &mut S, host: &str, target: 
         match socket.recv_from(&mut buf) {
             Ok((amt, _)) => {
                 let response = str::from_utf8(&buf[..amt]).expect("Failed to parse response");
-                responses.push(response.to_string());
+                if let Some(ssdp_response) = parse_ssdp_response(response) {
+                    responses.push(ssdp_response);
+                }
             }
             Err(e) => {
-                // Break the loop if no more responses or an error occurs
                 if e.kind() == std::io::ErrorKind::WouldBlock {
-                    break;  // Timed out, no more responses
+                    break;
                 } else {
                     println!("Error receiving SSDP response: {}", e);
                 }
@@ -75,9 +82,42 @@ pub fn send_ssdp_request<S: UdpSocketTrait>(socket: &mut S, host: &str, target: 
     Ok(responses)
 }
 
+fn parse_ssdp_response(response: &str) -> Option<SsdpResponse> {
+    let lines: Vec<&str> = response.split("\r\n").collect();
+    let mut location = String::new();
+    let mut st = String::new();
+    let mut usn = String::new();
+    let mut friendly_name = None;
+
+    for line in lines {
+        println!("{}", line);
+        if line.starts_with("LOCATION: ") {
+            location = line.trim_start_matches("LOCATION: ").to_string();
+            continue;
+        }
+        if line.starts_with("ST: ") {
+            st = line.trim_start_matches("ST: ").to_string();
+            continue;
+        }
+        if line.starts_with("USN: ") {
+            usn = line.trim_start_matches("USN: ").to_string();
+            continue;
+        }
+        if line.starts_with("friendly-name: ") {
+            friendly_name = Some(line.trim_start_matches("friendly-name: ").to_string());
+        }
+    }
+
+    if !location.is_empty() {
+        Some(SsdpResponse { location, st, usn, friendly_name })
+    } else {
+        None
+    }
+}
+
 pub struct MockUdpSocket {
     responses: Vec<(usize, String)>,
-    send_error: Option<Box<dyn std::error::Error>>, // Use Box<dyn Error>
+    send_error: Option<Box<dyn std::error::Error>>,
     response_index: usize,
 }
 
@@ -129,7 +169,9 @@ mod tests {
         let result = send_ssdp_request(&mut mock_socket, MULTICAST_ADDRESS, SONOS_SEARCH_TARGET);
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Vec::<String>::new());
+
+        let responses = result.unwrap();
+        assert_eq!(responses, Vec::<SsdpResponse>::new());
     }
 
     #[test]
@@ -148,19 +190,26 @@ mod tests {
 
     #[test]
     fn test_send_ssdp_request_success() {
-        // Mock response to simulate a device's SSDP response
         let mut mock_socket = MockUdpSocket {
             responses: vec![
-                (49, "HTTP/1.1 200 OK\r\nLOCATION: http://mock_device\r\n\r\n".to_string()),
+                (139, "HTTP/1.1 200 OK\r\nLOCATION: http://mock_device\r\nST: urn:schemas-upnp-org:device:ZonePlayer:1\r\nUSN: uuid:12345\r\nFriendlyName: Mock Device\r\n\r\n".to_string()),
             ],
             send_error: None,
             response_index: 0,
         };
 
-        let result = send_ssdp_request(&mut mock_socket, MULTICAST_ADDRESS, SONOS_SEARCH_TARGET).unwrap();
-        
-        // Verify the mock response is returned correctly
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0], "HTTP/1.1 200 OK\r\nLOCATION: http://mock_device\r\n\r\n");
+        let result = send_ssdp_request(&mut mock_socket, MULTICAST_ADDRESS, SONOS_SEARCH_TARGET);
+
+        assert!(result.is_ok());
+
+        let responses = result.unwrap();
+    
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0], SsdpResponse{
+            location: "http://mock_device".to_string(),
+            st: "urn:schemas-upnp-org:device:ZonePlayer:1".to_string(),
+            usn: "uuid:12345".to_string(),
+            friendly_name: None,
+        });
     }
 }
