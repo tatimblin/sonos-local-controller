@@ -90,7 +90,6 @@ fn parse_ssdp_response(response: &str) -> Option<SsdpResponse> {
     let mut friendly_name = None;
 
     for line in lines {
-        println!("{}", line);
         if line.starts_with("LOCATION: ") {
             location = line.trim_start_matches("LOCATION: ").to_string();
             continue;
