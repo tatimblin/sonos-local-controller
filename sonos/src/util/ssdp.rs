@@ -28,6 +28,49 @@ impl UdpSocketTrait for UdpSocket {
     }
 }
 
+pub struct SsdpResponseIter<'a, S: UdpSocketTrait> {
+    socket: &'a mut S,
+    buf: [u8; 1024],
+    finished: bool,
+}
+
+impl<'a, S: UdpSocketTrait> SsdpResponseIter<'a, S> {
+    fn new(socket: &'a mut S) -> Self {
+        SsdpResponseIter {
+            socket,
+            buf: [0; 1024],
+            finished: false,
+        }
+    }
+}
+
+impl<'a, S: UdpSocketTrait> Iterator for SsdpResponseIter<'a, S> {
+    type Item = Result<SsdpResponse, std::io::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
+        match self.socket.recv_from(&mut self.buf) {
+            Ok((amt, _)) => {
+                let response = str::from_utf8(&self.buf[..amt]).expect("Failed to parse response");
+                Some(parse_ssdp_response(response).ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to parse SSDP response")
+                }))
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    self.finished = true;
+                    None
+                } else {
+                    Some(Err(e))
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct SsdpResponse {
     pub location: String,
@@ -36,50 +79,40 @@ pub struct SsdpResponse {
     pub friendly_name: Option<String>,
 }
 
+impl SsdpResponse {
+    pub fn new() -> Self {
+        SsdpResponse {
+            location: String::new(),
+            st: String::new(),
+            usn: String::new(),
+            friendly_name: None,
+        }
+    }
+}
+
 /// Sends an SSDP M-SEARCH request and returns the responses as a vector of SsdpResponses.
-pub fn send_ssdp_request<S: UdpSocketTrait>(socket: &mut S, host: &str, target: &str) -> std::io::Result<Vec<SsdpResponse>> {
+pub fn send_ssdp_request<'a, S: UdpSocketTrait>(socket: &'a mut S, host: &str, target: &str) -> std::io::Result<SsdpResponseIter<'a, S>> {
     // Allow the socket to send and receive multicast packets
     socket.set_multicast_loop_v4(true)?;
     socket.set_read_timeout(Some(Duration::from_secs(5)))?;
 
     // SSDP M-SEARCH request
     let m_search = format!(
-      "M-SEARCH * HTTP/1.1\r\n\
-      HOST: {}\r\n\
-      MAN: \"ssdp:discover\"\r\n\
-      MX: 2\r\n\
-      ST: {}\r\n\
-      USER-AGENT: Rust/1.0 UPnP/1.0 MyClient/1.0\r\n\
-      \r\n",
-      host,
-      target
+        "M-SEARCH * HTTP/1.1\r\n\
+        HOST: {}\r\n\
+        MAN: \"ssdp:discover\"\r\n\
+        MX: 2\r\n\
+        ST: {}\r\n\
+        USER-AGENT: Rust/1.0 UPnP/1.0 MyClient/1.0\r\n\
+        \r\n",
+        host,
+        target
     );
 
     // Send the M-SEARCH request
     socket.send_to(m_search.as_bytes(), host)?;
 
-    let mut responses = Vec::new();
-    let mut buf = [0; 1024];
-
-    loop {
-        match socket.recv_from(&mut buf) {
-            Ok((amt, _)) => {
-                let response = str::from_utf8(&buf[..amt]).expect("Failed to parse response");
-                if let Some(ssdp_response) = parse_ssdp_response(response) {
-                    responses.push(ssdp_response);
-                }
-            }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::WouldBlock {
-                    break;
-                } else {
-                    println!("Error receiving SSDP response: {}", e);
-                }
-            }
-        }
-    }
-
-    Ok(responses)
+    Ok(SsdpResponseIter::new(socket))
 }
 
 fn parse_ssdp_response(response: &str) -> Option<SsdpResponse> {
@@ -165,12 +198,11 @@ mod tests {
             response_index: 0,
         };
 
-        let result = send_ssdp_request(&mut mock_socket, MULTICAST_ADDRESS, SONOS_SEARCH_TARGET);
+        let mut response_stream = send_ssdp_request(&mut mock_socket, MULTICAST_ADDRESS, SONOS_SEARCH_TARGET).unwrap();
 
-        assert!(result.is_ok());
-
-        let responses = result.unwrap();
-        assert_eq!(responses, Vec::<SsdpResponse>::new());
+        let response = response_stream.next();
+        
+        assert!(response.is_none());
     }
 
     #[test]
@@ -181,10 +213,15 @@ mod tests {
             response_index: 0,
         };
 
-        let result = send_ssdp_request(&mut mock_socket, MULTICAST_ADDRESS, SONOS_SEARCH_TARGET);
+        let response_stream = send_ssdp_request(&mut mock_socket, MULTICAST_ADDRESS, SONOS_SEARCH_TARGET);
 
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::Other);
+        assert!(response_stream.is_err());
+
+        if let Err(err) = response_stream {
+            assert_eq!(err.kind(), std::io::ErrorKind::Other);
+        } else {
+            panic!("Expected an error, but got Ok");
+        }
     }
 
     #[test]
@@ -197,18 +234,24 @@ mod tests {
             response_index: 0,
         };
 
-        let result = send_ssdp_request(&mut mock_socket, MULTICAST_ADDRESS, SONOS_SEARCH_TARGET);
+        let mut response_stream = send_ssdp_request(&mut mock_socket, MULTICAST_ADDRESS, SONOS_SEARCH_TARGET).unwrap();
 
-        assert!(result.is_ok());
+        let response = response_stream.next();
 
-        let responses = result.unwrap();
+        assert!(response.is_some());
+
+        let response = response.unwrap();
     
-        assert_eq!(responses.len(), 1);
-        assert_eq!(responses[0], SsdpResponse{
-            location: "http://mock_device".to_string(),
-            st: "urn:schemas-upnp-org:device:ZonePlayer:1".to_string(),
-            usn: "uuid:12345".to_string(),
-            friendly_name: None,
-        });
+        match response {
+            Ok(ssdp_response) => {
+                assert_eq!(ssdp_response, SsdpResponse {
+                    location: "http://mock_device".to_string(),
+                    st: "urn:schemas-upnp-org:device:ZonePlayer:1".to_string(),
+                    usn: "uuid:12345".to_string(),
+                    friendly_name: None,
+                });
+            }
+            Err(_) => panic!("Expected an Ok response, but got an error.")
+        }
     }
 }

@@ -10,7 +10,14 @@ pub fn search() -> std::io::Result<()> {
   )?;
 
   for response in responses {
-    println!("Device found at: {}", response.location);
+    match response {
+      Ok(ssdp_response) => {
+        println!("Device found at: {}", ssdp_response.location);
+      }
+      Err(e) => {
+        println!("Error receiving SSDP response: {}", e);
+      }
+    }
   }
 
   Ok(())
