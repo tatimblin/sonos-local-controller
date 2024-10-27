@@ -1,6 +1,8 @@
-pub mod util {
-  pub mod ssdp;
-}
+mod system;
+pub use system::System;
 
-pub mod helloworld;
-pub mod system;
+mod speaker;
+pub use speaker::{Speaker, SpeakerInfo};
+
+mod util;
+pub use util::ssdp;

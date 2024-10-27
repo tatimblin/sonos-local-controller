@@ -1,24 +1,39 @@
-use std::net::UdpSocket;
-use crate::util::ssdp::send_ssdp_request;
+use std::{
+  net::UdpSocket,
+  io::Result,
+};
 
-pub fn search() -> std::io::Result<()> {
-  let mut socket = UdpSocket::bind("0.0.0.0:0")?;
-  let responses = send_ssdp_request(
-      &mut socket,
+use crate::Speaker;
+use crate::util::ssdp::{
+  send_ssdp_request,
+  SsdpResponseIter,
+};
+
+pub struct System {
+  responses: SsdpResponseIter<UdpSocket>,
+}
+
+impl System {
+  pub fn new() -> Result<Self> {
+    let socket = UdpSocket::bind("0.0.0.0:0")?;
+    let responses = send_ssdp_request(
+      socket,
       "239.255.255.250:1900",
       "urn:schemas-upnp-org:device:ZonePlayer:1"
-  )?;
+    )?;
 
-  for response in responses {
-    match response {
-      Ok(ssdp_response) => {
-        println!("Device found at: {}", ssdp_response.location);
-      }
-      Err(e) => {
-        println!("Error receiving SSDP response: {}", e);
-      }
-    }
+    Ok(System { responses })
   }
 
-  Ok(())
+  pub fn speakers(self) -> impl Iterator<Item = Speaker> {
+    self.responses.filter_map(|response| {
+      match response {
+        Ok(ssdp) => Speaker::from_ip(ssdp.location).ok(),
+        Err(e) => {
+          println!("Error receiving SSDP response: {}", e);
+          None
+        }
+      }
+    })
+  }
 }

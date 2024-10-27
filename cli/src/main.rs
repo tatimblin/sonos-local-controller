@@ -25,8 +25,10 @@ use ratatui::{
 };
 
 fn main() -> io::Result<()> {
-    if let Err(e) = sonos::system::search() {
-        eprintln!("Error occurred during SSDP search: {}", e);
+    let system= sonos::System::new()?;
+
+    for speaker in system.speakers() {
+        println!("{:?}", speaker.name);
     }
 
     let mut terminal = ratatui::init();
