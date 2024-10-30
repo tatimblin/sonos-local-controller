@@ -6,3 +6,6 @@ pub use speaker::{Speaker, SpeakerInfo};
 
 mod util;
 pub use util::ssdp;
+
+mod error;
+pub use error::SonosError;
