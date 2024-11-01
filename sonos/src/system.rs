@@ -28,7 +28,7 @@ impl System {
   pub fn speakers(self) -> impl Iterator<Item = Speaker> {
     self.responses.filter_map(|response| {
       match response {
-        Ok(ssdp) => Speaker::from_ip(ssdp.location).ok(),
+        Ok(ssdp) => Speaker::from_location(&ssdp.location).ok(),
         Err(e) => {
           println!("Error receiving SSDP response: {}", e);
           None
