@@ -28,7 +28,7 @@ fn main() -> io::Result<()> {
     let system= sonos::System::new()?;
 
     for speaker in system.speakers() {
-        speaker.mute();
+        speaker.pause();
         println!("{:?}", speaker.name);
     }
 

@@ -16,6 +16,7 @@ pub struct Speaker {
 
 impl Speaker {
   pub fn from_location(location: &str) -> Result<Speaker, SonosError> {
+
     let xml = Self::get_speaker_info_xml(location)?;
     let ip = match http::get_ip_from_url(location) {
       Some(ip) => ip,
@@ -44,8 +45,16 @@ impl Speaker {
     }
   }
 
-  pub fn mute(&self) {
-    match self.send_action(Action::SetMute, "<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredMute>1</DesiredMute>"
+  pub fn play(&self) {
+    match self.send_action(Action::Play, "<InstanceID>0</InstanceID><Speed>1</Speed>"
+    ) {
+      Ok(response) => println!("Response: {}", response),
+      Err(error) => eprintln!("Error: {}", error),
+    }
+  }
+
+  pub fn pause(&self) {
+    match self.send_action(Action::Pause, "<InstanceID>0</InstanceID>"
     ) {
       Ok(response) => println!("Response: {}", response),
       Err(error) => eprintln!("Error: {}", error),
@@ -53,6 +62,7 @@ impl Speaker {
   }
 
   fn send_action(&self, action: Action, payload: &str) -> Result<String, String> {
+    println!("{}, {}, {}", action.name(), action.endpoint(), action.service());
     let body = format!(r#"
       <s:Envelope
         xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
@@ -67,11 +77,11 @@ impl Speaker {
     "#,
       action = action.name(),
       payload = payload,
-      service = action.service().as_str()
+      service = action.service()
     );
 
-    let soap_action = format!("\"{}#{}\"", action.service().as_str(), action.name());
-    let url = format!("http://{}:1400/{}", self.ip, action.endpoint().as_str());
+    let soap_action = format!("\"{}#{}\"", action.service(), action.name());
+    let url = format!("http://{}:1400/{}", self.ip, action.endpoint());
 
     let response = self.agent.post(&url)
       .set("Content-Type", "text/xml; charset=\"utf-8\"")
