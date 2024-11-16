@@ -33,6 +33,14 @@ impl Speaker {
     }
   }
 
+  pub fn new_with_name(name: String) -> Self {
+    Speaker {
+      name,
+      ip: String::new(),
+      agent: Agent::new(),
+    }
+  }
+
   fn get_speaker_info_xml(endpoint: &str) -> Result<String, SonosError> {
     match ureq::get(endpoint).call() {
       Ok(response) => response
