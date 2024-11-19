@@ -11,7 +11,7 @@ use crossterm::event::{
 };
 
 use ratatui::{
-    layout::{Alignment, Layout},
+    layout::Alignment,
     style::Stylize,
     symbols::border,
     text::Text,
