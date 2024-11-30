@@ -1,3 +1,4 @@
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
   layout::{Alignment, Constraint, Direction, Layout, Rect},
   text::{Line, Text},
@@ -7,7 +8,7 @@ use ratatui::{
 
 use sonos::Speaker;
 
-pub fn draw_startup_page(frame: &mut Frame, speakers: &[Speaker]) {
+pub fn draw(frame: &mut Frame, speakers: &[Speaker]) {
   let logo = Text::from(vec![
 		Line::from("  ___    ___    _ __     ___    ___ "),
 		Line::from("/ __|  / _ \\  | '_ \\   / _ \\  / __|"),
@@ -58,4 +59,11 @@ fn get_height_of_layout(layout: &Layout) -> u16 {
 	let dummy_rect = Rect::new(0, 0, 0, u16::MAX);
 	let inner_sections = layout.split(dummy_rect);
 	inner_sections.iter().map(|section| section.height).sum()
+}
+
+pub fn handle_event(app: &mut crate::App, key_event: KeyEvent) {
+  match key_event.code {
+    KeyCode::Char('a') => app.exit(),
+    _ => {}
+  }
 }
