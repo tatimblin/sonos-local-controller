@@ -8,6 +8,7 @@ use crate::util::http;
 
 use super::api::Action;
 
+#[derive(Debug)]
 pub struct Speaker {
   pub ip: String,
   agent: Agent,
@@ -16,7 +17,6 @@ pub struct Speaker {
 
 impl Speaker {
   pub fn from_location(location: &str) -> Result<Speaker, SonosError> {
-
     let xml = Self::get_speaker_info_xml(location)?;
     let ip = match http::get_ip_from_url(location) {
       Some(ip) => ip,
@@ -30,14 +30,6 @@ impl Speaker {
         name: speaker_info.device.name,
       }),
       Err(err) => Err(err),
-    }
-  }
-
-  pub fn new_with_name(name: String) -> Self {
-    Speaker {
-      name,
-      ip: String::new(),
-      agent: Agent::new(),
     }
   }
 

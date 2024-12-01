@@ -3,28 +3,27 @@ use crossterm::event::{
   KeyEvent
 };
 use ratatui::{
-  layout::Alignment,
-  symbols::border,
-  style::Stylize,
-  text::Text,
   widgets::{
-    block::Title,
     Block,
-    Paragraph
+    Borders,
+    List,
+    ListItem,
   },
   Frame,
 };
 
-pub fn draw(frame: &mut Frame) {
-  let title = Title::from(" Sonos Rooms ".bold());
-  let body = Text::from("body");
-  let block = Block::bordered()
-      .title(title.alignment(Alignment::Center))
-      .border_set(border::THICK);
-  let paragraph = Paragraph::new(body)
-      .centered()
-      .block(block);
-  frame.render_widget(paragraph, frame.area());
+use sonos::Speaker;
+
+pub fn draw(frame: &mut Frame, speakers: &mut Vec<Speaker>) {
+  let labels: Vec<ListItem> = speakers
+    .iter()
+    .map(|speaker| ListItem::new(speaker.name.clone()))
+    .collect();
+  
+  let list = List::new(labels)
+    .block(Block::default().borders(Borders::ALL).title("Speakers"));
+
+  frame.render_widget(list, frame.area());
 }
 
 pub fn handle_event(app: &mut crate::App, key_event: KeyEvent) {

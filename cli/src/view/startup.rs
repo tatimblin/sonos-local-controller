@@ -8,7 +8,7 @@ use ratatui::{
 
 use sonos::Speaker;
 
-pub fn draw(frame: &mut Frame, speakers: &[Speaker]) {
+pub fn draw(frame: &mut Frame, speaker: Option<&Speaker>) {
   let logo = Text::from(vec![
 		Line::from("  ___    ___    _ __     ___    ___ "),
 		Line::from("/ __|  / _ \\  | '_ \\   / _ \\  / __|"),
@@ -17,7 +17,7 @@ pub fn draw(frame: &mut Frame, speakers: &[Speaker]) {
 	]);
   let mut body = Text::from("searching...");
 
-  if let Some(speaker) = speakers.get(0) {
+  if let Some(speaker) = speaker {
 		body = Text::from(speaker.name.as_str());
   }
 

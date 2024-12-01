@@ -40,32 +40,39 @@ impl Default for Page {
 pub struct App {
     exit: bool,
     page: Page,
+    speakers: Vec<Speaker>,
 }
 
 impl App {
+    fn default() -> Self {
+        Self {
+            exit: false,
+            page: Page::Startup,
+            speakers: Vec::new(),
+        }
+    }
+
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         let system= sonos::System::new()?;
-        let mut speakers: Vec<Speaker> = Vec::new();
 
         for speaker in system.speakers() {
-            let speaker_partial_clone = &[Speaker::new_with_name(speaker.name.clone())];
-            terminal.draw(|frame| self.draw(frame, speaker_partial_clone))?;
-            speakers.push(speaker);
+            terminal.draw(|frame| self.draw(frame))?;
+            self.speakers.push(speaker);
         }
 
         self.page = Page::Control;
 
         while !self.exit {
-            terminal.draw(|frame| self.draw(frame, &speakers))?;
+            terminal.draw(|frame| self.draw(frame))?;
             let _ = self.handle_events();
         }
         Ok(())
     }
 
-    fn draw(&self, frame: &mut Frame, speakers: &[Speaker]) {
+    fn draw(&mut self, frame: &mut Frame) {
         match self.page {
-            Page::Startup => startup::draw(frame, speakers),
-            Page::Control => control::draw(frame),
+            Page::Startup => startup::draw(frame, self.speakers.last()),
+            Page::Control => control::draw(frame, &mut self.speakers),
         }
     }
 
