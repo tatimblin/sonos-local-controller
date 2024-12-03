@@ -18,7 +18,7 @@ pub fn draw(frame: &mut Frame, speaker: Option<&Speaker>) {
   let mut body = Text::from("searching...");
 
   if let Some(speaker) = speaker {
-		body = Text::from(speaker.name.as_str());
+		body = Text::from(speaker.get_info().get_name());
   }
 
 	let inner_layout = Layout::default()

@@ -12,7 +12,7 @@ use super::api::Action;
 pub struct Speaker {
   pub ip: String,
   agent: Agent,
-  pub name: String,
+  speaker_info: SpeakerInfo,
 }
 
 impl Speaker {
@@ -27,7 +27,7 @@ impl Speaker {
       Ok(speaker_info) => Ok(Speaker{
         ip: ip,
         agent: Agent::new(),
-        name: speaker_info.device.name,
+        speaker_info: speaker_info,
       }),
       Err(err) => Err(err),
     }
@@ -43,6 +43,10 @@ impl Speaker {
         Err(SonosError::DeviceUnreachable)
       }
     }
+  }
+
+  pub fn get_info(&self) -> &SpeakerInfo {
+    &self.speaker_info
   }
 
   pub fn play(&self) {
@@ -62,7 +66,6 @@ impl Speaker {
   }
 
   fn send_action(&self, action: Action, payload: &str) -> Result<String, String> {
-    println!("{}, {}, {}", action.name(), action.endpoint(), action.service());
     let body = format!(r#"
       <s:Envelope
         xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"

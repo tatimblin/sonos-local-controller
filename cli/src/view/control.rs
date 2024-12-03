@@ -17,7 +17,14 @@ use sonos::Speaker;
 pub fn draw(frame: &mut Frame, speakers: &mut Vec<Speaker>) {
   let labels: Vec<ListItem> = speakers
     .iter()
-    .map(|speaker| ListItem::new(speaker.name.clone()))
+    .map(|speaker| {
+      let text = format!(
+        "{} - {}",
+        speaker.get_info().get_name(),
+        speaker.get_info().get_room_name()
+      );
+      ListItem::new(text)
+    })
     .collect();
   
   let list = List::new(labels)
