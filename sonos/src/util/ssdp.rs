@@ -90,12 +90,12 @@ impl SsdpResponse {
     }
 }
 
-/// Sends an SSDP M-SEARCH request and returns the responses as a vector of SsdpResponses.
+// Sends an SSDP M-SEARCH request and returns the responses as a vector.
 pub fn send_ssdp_request<S: UdpSocketTrait>(socket: S, host: &str, urn: &str) -> std::io::Result<SsdpResponseIter<S>> {
     let mut socket = socket;
-    // Allow the socket to send and receive multicast packets
+
     socket.set_multicast_loop_v4(true)?;
-    socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+    socket.set_read_timeout(Some(Duration::from_millis(500)))?; // TODO: handle this better
 
     // SSDP M-SEARCH request
     let m_search = format!(
@@ -110,7 +110,6 @@ pub fn send_ssdp_request<S: UdpSocketTrait>(socket: S, host: &str, urn: &str) ->
         urn
     );
 
-    // Send the M-SEARCH request
     socket.send_to(m_search.as_bytes(), host)?;
 
     Ok(SsdpResponseIter::new(socket))
@@ -124,25 +123,34 @@ fn parse_ssdp_response(response: &str) -> Option<SsdpResponse> {
     let mut friendly_name = None;
 
     for line in lines {
-        if line.starts_with("LOCATION: ") {
-            location = line.trim_start_matches("LOCATION: ").to_string();
+        if let Some(value) = get_value_from_key_value_line(line, "LOCATION: ") {
+            location = value.to_string();
             continue;
         }
-        if line.starts_with("ST: ") {
-            urn = line.trim_start_matches("ST: ").to_string();
+        if let Some(value) = get_value_from_key_value_line(line, "ST: ") {
+            urn = value.to_string();
             continue;
         }
-        if line.starts_with("USN: ") {
-            usn = line.trim_start_matches("USN: ").to_string();
+        if let Some(value) = get_value_from_key_value_line(line, "USN: ") {
+            usn = value.to_string();
             continue;
         }
-        if line.starts_with("friendly-name: ") {
-            friendly_name = Some(line.trim_start_matches("friendly-name: ").to_string());
+        if let Some(value) = get_value_from_key_value_line(line, "friendly-name: ") {
+            friendly_name = Some(value.to_string());
+            continue;
         }
     }
 
     if !location.is_empty() {
         Some(SsdpResponse { location, urn, usn, friendly_name })
+    } else {
+        None
+    }
+}
+
+fn get_value_from_key_value_line<'a>(line: &'a str, prefix: &'a str) -> Option<&'a str> {
+    if line.starts_with(prefix) {
+        Some(line.trim_start_matches(prefix))
     } else {
         None
     }
