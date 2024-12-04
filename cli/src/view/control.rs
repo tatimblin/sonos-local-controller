@@ -19,9 +19,10 @@ pub fn draw(frame: &mut Frame, speakers: &mut Vec<Speaker>) {
     .iter()
     .map(|speaker| {
       let text = format!(
-        "{} - {}",
+        "{} - {}: volume = {:?}",
         speaker.get_info().get_name(),
-        speaker.get_info().get_room_name()
+        speaker.get_info().get_room_name(),
+        speaker.get_volume()
       );
       ListItem::new(text)
     })

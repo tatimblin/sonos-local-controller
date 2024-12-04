@@ -1,4 +1,5 @@
 use ureq::{Agent, Error};
+use xmltree::Element;
 
 use crate::{
   SonosError,
@@ -6,7 +7,11 @@ use crate::{
 };
 use crate::util::http;
 
-use super::api::Action;
+use super::api::{
+  Action,
+  get_child_element_text,
+  parse_xml_response,
+};
 
 #[derive(Debug)]
 pub struct Speaker {
@@ -52,7 +57,7 @@ impl Speaker {
   pub fn play(&self) {
     match self.send_action(Action::Play, "<InstanceID>0</InstanceID><Speed>1</Speed>"
     ) {
-      Ok(response) => println!("Response: {}", response),
+      Ok(response) => println!("Response: {:?}", response),
       Err(error) => eprintln!("Error: {}", error),
     }
   }
@@ -60,12 +65,26 @@ impl Speaker {
   pub fn pause(&self) {
     match self.send_action(Action::Pause, "<InstanceID>0</InstanceID>"
     ) {
-      Ok(response) => println!("Response: {}", response),
+      Ok(response) => println!("Response: {:?}", response),
       Err(error) => eprintln!("Error: {}", error),
     }
   }
 
-  fn send_action(&self, action: Action, payload: &str) -> Result<String, String> {
+  pub fn get_volume(&self) -> Result<u8, SonosError> {
+    match self.send_action(Action::GetVolume, "<InstanceID>0</InstanceID><Channel>Master</Channel>") {
+      Ok(response) => {
+        let volume = get_child_element_text(&response, "CurrentVolume")?
+          .parse::<u8>()
+          .map_err(|e| SonosError::ParseError(format!("Failed to parse volume: {}", e)))?;
+        println!("{:?}", volume);
+        Ok(volume)
+      },
+      Err(error) => Err(error),
+    }
+  }
+
+  // TODO: Move to api.rs
+  fn send_action(&self, action: Action, payload: &str) -> Result<Element, SonosError> {
     let body = format!(r#"
       <s:Envelope
         xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
@@ -92,8 +111,8 @@ impl Speaker {
       .send_string(&body);
 
     match response {
-      Ok(res) => res.into_string().map_err(|e| e.to_string()),
-      Err(err) => Err(format!("Failed to send command: {}", err)),
+      Ok(response) => parse_xml_response(response, action),
+      Err(_) => Err(SonosError::DeviceUnreachable),
     }
   }
 }
