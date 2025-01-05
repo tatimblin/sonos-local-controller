@@ -76,7 +76,6 @@ impl Speaker {
         let volume = get_child_element_text(&response, "CurrentVolume")?
           .parse::<u8>()
           .map_err(|e| SonosError::ParseError(format!("Failed to parse volume: {}", e)))?;
-        println!("{:?}", volume);
         Ok(volume)
       },
       Err(error) => Err(error),

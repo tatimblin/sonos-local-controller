@@ -1,20 +1,16 @@
-use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-  layout::{Alignment, Constraint, Direction, Layout, Rect},
-  text::{Line, Text},
+  layout::{ Alignment, Constraint, Direction, Layout, Rect },
+  text::Text,
   widgets::Paragraph,
   Frame,
 };
 
 use sonos::Speaker;
 
+use crate::widget::logo;
+
 pub fn draw(frame: &mut Frame, speaker: Option<&Speaker>) {
-  let logo = Text::from(vec![
-		Line::from("  ___    ___    _ __     ___    ___ "),
-		Line::from("/ __|  / _ \\  | '_ \\   / _ \\  / __|"),
-		Line::from("\\__ \\ | (_) | | | | | | (_) | \\__ \\"),
-		Line::from("|___/  \\___/  |_| |_|  \\___/  |___/"),
-	]);
+  let logo = logo();
   let mut body = Text::from("searching...");
 
   if let Some(speaker) = speaker {
@@ -59,11 +55,4 @@ fn get_height_of_layout(layout: &Layout) -> u16 {
 	let dummy_rect = Rect::new(0, 0, 0, u16::MAX);
 	let inner_sections = layout.split(dummy_rect);
 	inner_sections.iter().map(|section| section.height).sum()
-}
-
-pub fn handle_event(app: &mut crate::App, key_event: KeyEvent) {
-  match key_event.code {
-    KeyCode::Char('a') => app.exit(),
-    _ => {}
-  }
 }

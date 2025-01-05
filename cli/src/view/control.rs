@@ -1,42 +1,61 @@
+use std::io;
 use crossterm::event::{
   KeyCode,
   KeyEvent
 };
 use ratatui::{
-  widgets::{
-    Block,
-    Borders,
-    List,
-    ListItem,
-  },
-  Frame,
+  DefaultTerminal,
+  Frame
 };
 
 use sonos::Speaker;
 
-pub fn draw(frame: &mut Frame, speakers: &mut Vec<Speaker>) {
-  let labels: Vec<ListItem> = speakers
-    .iter()
-    .map(|speaker| {
-      let text = format!(
-        "{} - {}: volume = {:?}",
-        speaker.get_info().get_name(),
-        speaker.get_info().get_room_name(),
-        speaker.get_volume()
-      );
-      ListItem::new(text)
-    })
-    .collect();
-  
-  let list = List::new(labels)
-    .block(Block::default().borders(Borders::ALL).title("Speakers"));
+// use crate::EventHandler;
+// use crate::Page;
+use crate::widget::selectable_list::SelectableList;
 
-  frame.render_widget(list, frame.area());
+pub struct ControlState {
+  list: SelectableList,
 }
 
-pub fn handle_event(app: &mut crate::App, key_event: KeyEvent) {
+impl ControlState {
+  pub fn new(speakers: &Vec<Speaker>) -> Self {
+    let labels: Vec<String> = speakers
+      .iter()
+      .map(|speaker| {
+        format!(
+          "{} - {}",
+          speaker.get_info().get_name(),
+          speaker.get_info().get_room_name()
+        )
+      })
+      .collect();
+
+    Self {
+      list: SelectableList::new("Speakers", labels),
+    }
+  }
+}
+
+pub fn render(frame: &mut Frame, state: &mut ControlState) {
+  state.list.draw(frame, frame.area());
+}
+
+pub fn handle_input(state: &mut ControlState, key_event: KeyEvent, terminal: &mut DefaultTerminal) -> io::Result<()> {
   match key_event.code {
-    KeyCode::Char('a') => app.exit(),
+    KeyCode::Down => {
+      state.list.next();
+      terminal.draw(|frame| {
+        state.list.draw(frame, frame.area());
+      })?;
+    },
+    KeyCode::Up => {
+      state.list.previous();
+      terminal.draw(|frame| {
+        state.list.draw(frame, frame.area());
+      })?;
+    }
     _ => {}
   }
+  Ok(())
 }

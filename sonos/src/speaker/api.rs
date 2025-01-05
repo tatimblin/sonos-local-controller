@@ -78,7 +78,6 @@ impl Action {
 pub fn parse_xml_response(response: Response, action: Action) -> Result<Element, SonosError> {
   match response.into_string() {
     Ok(xml_string) => {
-      println!("{}", xml_string);
       let xml = Element::parse(xml_string.as_bytes())
         .map_err(|e| SonosError::ParseError(format!("Failed to parse XML: {}", e)))?;
 
