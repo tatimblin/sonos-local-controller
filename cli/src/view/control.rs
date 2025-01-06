@@ -10,8 +10,6 @@ use ratatui::{
 
 use sonos::Speaker;
 
-// use crate::EventHandler;
-// use crate::Page;
 use crate::widget::selectable_list::SelectableList;
 
 pub struct ControlState {

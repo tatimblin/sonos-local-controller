@@ -1,6 +1,5 @@
 #[derive(Debug)]
 pub enum Page {
-    Unknown,
     Startup,
     Control,
 }

@@ -84,8 +84,7 @@ impl App {
         if let Some(control_state) = &mut self.state.control_state {
           control::render(frame, control_state)
         }
-      },
-      Page::Unknown => startup::draw(frame, self.state.speakers.last()) // Add error page.
+      }
     }
   }
 
