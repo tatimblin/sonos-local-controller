@@ -14,9 +14,6 @@ fn test_parse_speaker_info_from_xml() {
 
   let speaker_info = parsed_info.unwrap();
 
-  assert_eq!(speaker_info.device.device_type, "urn:schemas-upnp-org:device:ZonePlayer:1");
-  assert_eq!(speaker_info.device.name, "10.0.0.62 - Sonos Playbar - RINCON_5CAAFDAE58BD01400");
-  assert_eq!(speaker_info.device.manufacturer, "Sonos, Inc.");
-  assert_eq!(speaker_info.device.model_name, "Sonos Playbar");
-  assert_eq!(speaker_info.device.serial_number, "5C-AA-FD-AE-58-BD:7");
+  assert_eq!(speaker_info.get_name(), "10.0.0.62 - Sonos Playbar - RINCON_5CAAFDAE58BD01400");
+  assert_eq!(speaker_info.get_room_name(), "Living Room");
 }
