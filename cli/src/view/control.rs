@@ -21,10 +21,12 @@ impl ControlState {
     let labels: Vec<String> = speakers
       .iter()
       .map(|speaker| {
+        let volume = speaker.get_volume().unwrap_or(0);
         format!(
-          "{} - {}",
+          "{} - {}: {}",
           speaker.get_info().get_name(),
-          speaker.get_info().get_room_name()
+          speaker.get_info().get_room_name(),
+          volume
         )
       })
       .collect();
