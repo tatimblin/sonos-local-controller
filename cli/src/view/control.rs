@@ -17,15 +17,18 @@ pub struct ControlState {
 }
 
 impl ControlState {
-  pub fn new(speakers: &Vec<Speaker>) -> Self {
+  pub fn new(speakers: &mut Vec<Speaker>) -> Self {
     let labels: Vec<String> = speakers
-      .iter()
+      .iter_mut()
       .map(|speaker| {
+        let name = speaker.get_info().get_name().to_string();
+        let room = speaker.get_info().get_room_name().to_string();
         let volume = speaker.get_volume().unwrap_or(0);
+
         format!(
           "{} - {}: {}",
-          speaker.get_info().get_name(),
-          speaker.get_info().get_room_name(),
+          name,
+          room,
           volume
         )
       })
@@ -54,7 +57,10 @@ pub fn handle_input(state: &mut ControlState, key_event: KeyEvent, terminal: &mu
       terminal.draw(|frame| {
         state.list.draw(frame, frame.area());
       })?;
-    }
+    },
+    KeyCode::Left => {
+      let speaker = state.list.
+    },
     _ => {}
   }
   Ok(())

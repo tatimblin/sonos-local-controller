@@ -65,7 +65,7 @@ impl App {
     }
     self.state.page = Page::Control;
   
-    self.state.control_state = Some(ControlState::new(&self.state.speakers));
+    self.state.control_state = Some(ControlState::new(&mut self.state.speakers));
 
     while !self.exit {
       terminal.draw(|frame| self.render(frame))?;
@@ -79,7 +79,9 @@ impl App {
 
   fn render(&mut self, frame: &mut Frame) {
     match self.state.page {
-      Page::Startup => startup::draw(frame, self.state.speakers.last()),
+      Page::Startup => {
+        startup::draw(frame, self.state.speakers.last())
+      },
       Page::Control => {
         if let Some(control_state) = &mut self.state.control_state {
           control::render(frame, control_state)
@@ -95,8 +97,8 @@ impl App {
 
     match self.state.page {
       Page::Control => {
-        if let Some(control_state) = &mut self.state.control_state {
-          control::handle_input(control_state, key_event, terminal)?;
+        if let Some(state) = &mut self.state.control_state {
+          control::handle_input(state, key_event, terminal)?;
         }
       }
       _ => {}

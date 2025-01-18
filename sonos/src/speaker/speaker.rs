@@ -1,4 +1,4 @@
-use ureq::{Agent, Error};
+use ureq::{ Agent, Error };
 
 use crate::{
   SonosError,
@@ -8,13 +8,22 @@ use crate::util::http;
 use crate::speaker::client::Client;
 use crate::speaker::api::ApiClient;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Speaker {
   api: ApiClient,
   speaker_info: SpeakerInfo,
+
+  volume: Option<u8>,
 }
 
 impl Speaker {
+  fn default() -> Self {
+    Self {
+      api: ApiClient::default(),
+      speaker_info: SpeakerInfo::default(),
+      volume: None.into(),
+    }
+  }
   pub fn from_location(location: &str) -> Result<Speaker, SonosError> {
     let xml = Self::get_speaker_info_xml(location)?;
     let ip = match http::get_ip_from_url(location) {
@@ -26,6 +35,8 @@ impl Speaker {
       Ok(speaker_info) => Ok(Speaker{
         api: ApiClient::new(Client::new(ip, Agent::new())),
         speaker_info: speaker_info,
+
+        volume: None.into(),
       }),
       Err(err) => Err(err),
     }
@@ -55,8 +66,17 @@ impl Speaker {
     self.api.pause()
   }
 
+
   pub fn get_volume(&self) -> Result<u8, SonosError> {
     self.api.get_volume()
+  }
+
+  pub fn set_volume(&self, volume: u8) -> Result<u8, SonosError> {
+    self.api.set_volume(volume)
+  }
+
+  pub fn set_relative_volume(&self, adjustment: i8) -> Result<u8, SonosError> {
+    self.api.set_relative_volume(adjustment)
   }
 }
 

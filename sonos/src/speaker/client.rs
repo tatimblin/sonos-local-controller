@@ -12,6 +12,13 @@ pub struct Client {
 }
 
 impl Client {
+  fn default() -> Self {
+    Self {
+      ip: "0.0.0.0".to_string(),
+      agent: Agent::new(),
+    }
+  }
+
   pub fn new(ip: String, agent: Agent) -> Self {
     Self { ip, agent }
   }

@@ -1,10 +1,3 @@
-use ureq::Response;
-use xmltree::Element;
-use core::error;
-use std::borrow::Cow;
-
-use crate::SonosError;
-
 #[derive(Debug)]
 pub struct ServiceInfo {
   pub endpoint: &'static str,
@@ -45,6 +38,8 @@ pub enum Action {
   Play,
   Pause,
   GetVolume,
+  SetVolume,
+  SetRelativeVolume,
 }
 
 impl Action {
@@ -61,6 +56,8 @@ impl Action {
       Action::Play => "Play",
       Action::Pause => "Pause",
       Action::GetVolume => "GetVolume",
+      Action::SetVolume => "SetVolume",
+      Action::SetRelativeVolume => "SetRelativeVolume",
     }
   }
 
@@ -70,6 +67,8 @@ impl Action {
       | Action::Pause
       => Service::av_transport(),
       Action::GetVolume
+      | Action::SetVolume
+      | Action::SetRelativeVolume
       => Service::rendering_control(),
     }
   }

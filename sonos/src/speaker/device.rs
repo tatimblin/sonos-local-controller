@@ -1,6 +1,6 @@
 use serde_derive::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct Device {
   #[serde(rename = "deviceType")]
   pub device_type: String,
