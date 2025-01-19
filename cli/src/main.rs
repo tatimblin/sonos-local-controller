@@ -20,7 +20,7 @@ use crate::views::{
 pub struct App {
   store: Arc<Store>,
   exit: bool,
-  current_page: Box<dyn View>,
+  current_view: Box<dyn View>,
 }
 
 impl App {
@@ -28,7 +28,7 @@ impl App {
     let store = Arc::new(Store::new());
     Self {
       store: store.clone(),
-      current_page: Box::new(StartupView::new(store.clone())),
+      current_view: Box::new(StartupView::new(store.clone())),
       exit: false,
     }
   }
@@ -36,14 +36,14 @@ impl App {
   pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
     use_speakers(&self.store, || {
       terminal
-        .draw(|frame| self.current_page.render(frame))
+        .draw(|frame| self.current_view.render(frame))
         .map(|_| ())
     })?;
 
-    self.current_page = Box::new(ControlView::new(&self.store));
+    self.current_view = Box::new(ControlView::new(&self.store));
 
     while !self.exit {
-      terminal.draw(|frame| self.current_page.render(frame))?;
+      terminal.draw(|frame| self.current_view.render(frame))?;
 
       if let event::Event::Key(key_event) = event::read()? {
         self.handle_input(key_event)?;
@@ -61,7 +61,7 @@ impl App {
       _ => {}
     }
 
-    self.current_page.handle_input(key_event, &self.store)
+    self.current_view.handle_input(key_event, &self.store)
   }
 }
 
