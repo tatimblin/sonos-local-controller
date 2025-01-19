@@ -12,8 +12,6 @@ use crate::speaker::api::ApiClient;
 pub struct Speaker {
   api: ApiClient,
   speaker_info: SpeakerInfo,
-
-  volume: Option<u8>,
 }
 
 impl Speaker {
@@ -21,9 +19,9 @@ impl Speaker {
     Self {
       api: ApiClient::default(),
       speaker_info: SpeakerInfo::default(),
-      volume: None.into(),
     }
   }
+
   pub fn from_location(location: &str) -> Result<Speaker, SonosError> {
     let xml = Self::get_speaker_info_xml(location)?;
     let ip = match http::get_ip_from_url(location) {
@@ -35,8 +33,6 @@ impl Speaker {
       Ok(speaker_info) => Ok(Speaker{
         api: ApiClient::new(Client::new(ip, Agent::new())),
         speaker_info: speaker_info,
-
-        volume: None.into(),
       }),
       Err(err) => Err(err),
     }
