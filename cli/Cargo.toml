@@ -8,3 +8,4 @@ edition = "2021"
 crossterm = "0.28.1"
 ratatui = "0.28.1"
 sonos = { path = "../sonos" }
+rand = "0.8"

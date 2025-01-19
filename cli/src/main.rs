@@ -1,122 +1,73 @@
-mod view;
-pub mod widget;
-mod page;
+mod state;
+mod hooks;
+mod views;
+mod types;
+mod widgets;
 
 use std::io;
+use std::sync::Arc;
+use crossterm::event::{ self, KeyCode, KeyEvent };
+use ratatui::DefaultTerminal;
 
-use crossterm::event::{
-  self,
-  KeyCode,
-  KeyEvent,
+use crate::state::store::Store;
+use crate::hooks::use_speakers::use_speakers;
+use crate::views::{
+  View,
+  startup::StartupView,
+  control::ControlView,
 };
 
-use ratatui::{
-  DefaultTerminal,
-  Frame,
-};
-
-use sonos::Speaker;
-use view::control::ControlState;
-
-use crate::page::Page;
-use crate::view::{
-  startup,
-  control,
-};
-
-fn main() -> io::Result<()> {
-  let mut terminal = ratatui::init();
-  let app_result = App::default().run(&mut terminal);
-  ratatui::restore();
-  app_result
-}
-
-#[derive(Default)]
 pub struct App {
+  store: Arc<Store>,
   exit: bool,
-  state: AppState,
-}
-
-#[derive(Default)]
-struct AppState {
-  page: Page,
-  speakers: Vec<Speaker>,
-  control_state: Option<control::ControlState>,
+  current_page: Box<dyn View>,
 }
 
 impl App {
-  fn default() -> Self {
+  pub fn new() -> Self {
+    let store = Arc::new(Store::new());
     Self {
+      store: store.clone(),
+      current_page: Box::new(StartupView::new(store.clone())),
       exit: false,
-      state: AppState {
-        page: Page::Startup,
-        speakers: Vec::new(),
-        control_state: None,
-      },
     }
   }
 
   pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
-    let system = sonos::System::new()?;
+    use_speakers(&self.store, || {
+      terminal
+        .draw(|frame| self.current_page.render(frame))
+        .map(|_| ())
+    })?;
 
-    for speaker in system.speakers() {
-      terminal.draw(|frame| self.render(frame))?;
-      self.state.speakers.push(speaker);
-    }
-    self.state.page = Page::Control;
-  
-    self.state.control_state = Some(ControlState::new(&mut self.state.speakers));
+    self.current_page = Box::new(ControlView::new(&self.store));
 
     while !self.exit {
-      terminal.draw(|frame| self.render(frame))?;
-      
+      terminal.draw(|frame| self.current_page.render(frame))?;
+
       if let event::Event::Key(key_event) = event::read()? {
-        self.handle_input(key_event, terminal)?;
+        self.handle_input(key_event)?;
       }
     }
     Ok(())
   }
 
-  fn render(&mut self, frame: &mut Frame) {
-    match self.state.page {
-      Page::Startup => {
-        startup::draw(frame, self.state.speakers.last())
-      },
-      Page::Control => {
-        if let Some(control_state) = &mut self.state.control_state {
-          control::render(frame, control_state)
-        }
-      }
-    }
-  }
-
-  fn handle_input(&mut self, key_event: KeyEvent, terminal: &mut DefaultTerminal) -> io::Result<()> {
-    if self.handle_shared_event(key_event) {
-      return Ok(());
-    }
-
-    match self.state.page {
-      Page::Control => {
-        if let Some(state) = &mut self.state.control_state {
-          control::handle_input(state, key_event, terminal)?;
-        }
+  fn handle_input(&mut self, key_event: KeyEvent) -> io::Result<()> {
+    match key_event.code {
+      KeyCode::Char('q') => {
+        self.exit = true;
+        return Ok(());
       }
       _ => {}
     }
-    Ok(())
-  }
 
-  fn handle_shared_event(&mut self, key_event: KeyEvent) -> bool {
-    match key_event.code {
-      KeyCode::Char('q') => {
-        self.exit();
-        true
-      },
-      _ => false,
-    }
+    self.current_page.handle_input(key_event, &self.store)
   }
+}
 
-  fn exit(&mut self) {
-    self.exit = true;
-  }
+fn main() -> io::Result<()> {
+  let mut terminal = ratatui::init();
+  let app_result = App::new().run(&mut terminal);
+  ratatui::restore();
+  app_result
 }
