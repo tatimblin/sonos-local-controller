@@ -53,17 +53,10 @@ impl ApiClient {
     let payload = format!("<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>{}</DesiredVolume>", volume);
     match self.client.send_action(Action::SetVolume, payload.as_str()) {
       Ok(response) => {
-        let mut buffer = Cursor::new(Vec::new());
-        if response.write(&mut buffer).is_ok() {
-            if let Ok(xml_string) = String::from_utf8(buffer.into_inner()) {
-              println!("{}", xml_string); // Print the serialized XML
-            } else {
-              println!("Failed to convert XML bytes to a string.");
-            }
-        } else {
-          println!("Failed to write XML Element to buffer.");
-        }
-        Ok(volume)
+        let new_volume = self.client.get_child_element_text(&response, "NewVolume")?
+          .parse::<u8>()
+          .map_err(|e| SonosError::ParseError(format!("Failed to parse volume: {}", e)))?;
+        Ok(new_volume)
       },
       Err(error) => Err(error),
     }
@@ -73,17 +66,10 @@ impl ApiClient {
     let payload = format!("<InstanceID>0</InstanceID><Channel>Master</Channel><Adjustment>{}</Adjustment>", adjustment);
     match self.client.send_action(Action::SetRelativeVolume, payload.as_str()) {
       Ok(response) => {
-        let mut buffer = Cursor::new(Vec::new());
-        if response.write(&mut buffer).is_ok() {
-          if let Ok(xml_string) = String::from_utf8(buffer.into_inner()) {
-            println!("{}", xml_string);
-          } else {
-            print!("Failed to convert XML bytes to a string.");
-          }
-        } else {
-          println!("Failed to write XML Element to buffer.");
-        }
-        Ok(0)
+        let new_volume = self.client.get_child_element_text(&response, "NewVolume")?
+          .parse::<u8>()
+          .map_err(|e| SonosError::ParseError(format!("Failed to parse volume: {}", e)))?;
+        Ok(new_volume)
       },
       Err(error) => Err(error),
     }

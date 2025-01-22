@@ -41,6 +41,12 @@ impl View for ControlView {
             store.dispatch(AppAction::SetSelectedSpeaker(index));
           }
         },
+        KeyCode::Left => {
+          store.dispatch(AppAction::AdjustVolume(-4));
+        }
+        KeyCode::Right => {
+          store.dispatch(AppAction::AdjustVolume(4));
+        }
         _ => {}
       }
       Ok(())
