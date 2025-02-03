@@ -11,10 +11,7 @@ impl SpeakerList {
     let labels: Vec<String> = speakers
       .iter()
       .map(|speaker| {
-        let name = speaker.get_info().get_name().to_string();
-        let room = speaker.get_info().get_room_name().to_string();
-        let volume = speaker.get_volume().unwrap_or(0);
-        format!("{} - {}: {}", name, room, volume)
+        format!("Speaker: {}", &speaker.name)
       })
       .collect();
 

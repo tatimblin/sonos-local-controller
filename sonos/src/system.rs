@@ -22,10 +22,12 @@ impl System {
       "urn:schemas-upnp-org:device:ZonePlayer:1"
     )?;
 
-    Ok(System { responses })
+    Ok(System {
+      responses,
+    })
   }
 
-  pub fn speakers(self) -> impl Iterator<Item = Speaker> {
+  pub fn discover(self) -> impl Iterator<Item = Speaker> {
     self.responses.filter_map(|response| {
       match response {
         Ok(ssdp) => Speaker::from_location(&ssdp.location).ok(),

@@ -3,27 +3,27 @@ use xmltree::Element;
 use std::borrow::Cow;
 
 use crate::SonosError;
-use crate::speaker::model::Action;
+use crate::model::Action;
 
 #[derive(Debug)]
 pub struct Client {
-  ip: String,
   agent: Agent,
 }
 
-impl Client {
+impl Default for Client {
   fn default() -> Self {
     Self {
-      ip: "0.0.0.0".to_string(),
       agent: Agent::new(),
     }
   }
+}
 
-  pub fn new(ip: String, agent: Agent) -> Self {
-    Self { ip, agent }
+impl Client {
+  pub fn new(agent: Agent) -> Self {
+    Self { agent }
   }
 
-  pub fn send_action(&self, action: Action, payload: &str) -> Result<Element, SonosError> {
+  pub fn send_action(&self, ip: &str, action: Action, payload: &str) -> Result<Element, SonosError> {
     let body = format!(r#"
       <s:Envelope
         xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
@@ -42,7 +42,7 @@ impl Client {
     );
 
     let soap_action = format!("\"{}#{}\"", action.service(), action.name());
-    let url = format!("http://{}:1400/{}", self.ip, action.endpoint());
+    let url = format!("http://{}:1400/{}", ip, action.endpoint());
 
     let response = self.agent.post(&url)
       .set("Content-Type", "text/xml; charset=\"utf-8\"")

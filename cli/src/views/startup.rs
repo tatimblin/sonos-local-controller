@@ -7,8 +7,6 @@ use ratatui::{
   widgets::Paragraph,
   Frame,
 };
-use rand;
-use rand::Rng;
 
 use crate::state::store::Store;
 use crate::widgets::{ logo::logo, util };
@@ -26,20 +24,14 @@ impl StartupView {
 
   fn get_status_message(&self) -> String {
     self.store.with_state(|state| {
-      let speaker_count = state.speakers.len();
-      let mut rng = rand::thread_rng();
-      match state.speakers.last() {
-        Some(speaker) => format!(
-          "({}/{}) {}",
-          speaker_count,
-          rng.gen_range(1..=100),
-          speaker.get_info().get_name()
-        ),
-        None => format!(
-          "{}",
-          "Searching...",
-        )
-      }
+      let speaker_count = &state.speakers.len();
+      let event = &state.speakers.get_last_event();
+      format!(
+        "({}/{}) {}",
+        speaker_count,
+        "??",
+        event,
+      )
     })
   }
 }
