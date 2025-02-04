@@ -10,14 +10,6 @@ pub struct Client {
   agent: Agent,
 }
 
-impl Default for Client {
-  fn default() -> Self {
-    Self {
-      agent: Agent::new(),
-    }
-  }
-}
-
 impl Client {
   pub fn new(agent: Agent) -> Self {
     Self { agent }
@@ -92,5 +84,21 @@ impl Client {
     self.get_child_element(el, name)?
       .get_text()
       .ok_or_else(|| SonosError::ParseError(format!("no text on {} element", name)).into())
+  }
+}
+
+impl Default for Client {
+  fn default() -> Self {
+    Self {
+      agent: Agent::new(),
+    }
+  }
+}
+
+impl Clone for Client {
+  fn clone(&self) -> Self {
+    Self {
+      agent: Agent::new(),
+    }
   }
 }

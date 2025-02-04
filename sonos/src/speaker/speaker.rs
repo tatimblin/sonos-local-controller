@@ -7,7 +7,7 @@ use crate::error::SonosError;
 use crate::util::http;
 use crate::client::Client;
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default)]
 pub struct Speaker {
   #[serde(rename = "device")]
   device: Device,
@@ -70,6 +70,10 @@ impl Speaker {
     &self.ip
   }
 
+  pub fn uuid(&self) -> &str {
+    &self.device.udn
+  }
+ 
   // Controls
   pub fn play(&self) -> Result<(), SonosError> {
     let payload = "<InstanceID>0</InstanceID><Speed>1</Speed>";

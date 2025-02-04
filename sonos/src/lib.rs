@@ -1,7 +1,6 @@
 mod model;
 
-mod groups;
-pub use groups::Groups;
+mod topology;
 
 mod client;
 pub use client::Client;
