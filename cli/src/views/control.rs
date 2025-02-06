@@ -15,7 +15,7 @@ pub struct ControlView {
 impl ControlView {
   pub fn new(store: &Store) -> Self {
     let speaker_list = store.with_state(|state| {
-      SpeakerList::new(&state.speakers)
+      SpeakerList::new(&Vec::new())
     });
 
     Self { speaker_list }

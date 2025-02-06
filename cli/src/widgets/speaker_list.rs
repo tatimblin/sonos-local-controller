@@ -11,7 +11,7 @@ impl SpeakerList {
     let labels: Vec<String> = speakers
       .iter()
       .map(|speaker| {
-        format!("Speaker: {}", &speaker.name)
+        format!("Speaker: {}", &speaker.name())
       })
       .collect();
 

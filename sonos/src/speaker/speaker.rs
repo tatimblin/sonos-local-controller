@@ -53,13 +53,17 @@ impl Speaker {
     }
   }
 
-  fn from_xml(xml: &str) -> Result<Self, SonosError> {
+  pub fn from_xml(xml: &str) -> Result<Self, SonosError> {
     serde_xml_rs::from_str(xml).map_err(|e| SonosError::ParseError(format!("Failed to parse Speaker: {}", e)))
   }
 
   // Getters
   pub fn name(&self) -> &str {
     &self.device.name
+  }
+
+  pub fn room_name(&self) -> &str {
+    &self.device.room_name
   }
 
   pub fn room(&self) -> &str {
