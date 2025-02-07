@@ -23,15 +23,8 @@ impl StartupView {
   }
 
   fn get_status_message(&self) -> String {
-    self.store.with_state(|_| {
-      let speaker_count = 0;
-      let event = "tbd";
-      format!(
-        "({}/{}) {}",
-        speaker_count,
-        "??",
-        event,
-      )
+    self.store.with_state(|state| {
+      state.status_message.clone()
     })
   }
 }

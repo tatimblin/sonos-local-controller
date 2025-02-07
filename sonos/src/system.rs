@@ -8,16 +8,16 @@ use crate::topology::Topology;
 use crate::Speaker;
 use crate::util::ssdp::send_ssdp_request;
 
-#[derive(Debug)]
-pub enum SpeakerEvent {
-  Found(Speaker),
-  GroupUpdate(String, Vec<String>),
-  Error(String),
-}
-
 pub struct System {
   speakers: HashMap<String, Speaker>,
   topology: Option<Topology>,
+}
+
+#[derive(Debug)]
+pub enum SystemEvent {
+  Found(Speaker),
+  GroupUpdate(String, Vec<String>),
+  Error(String),
 }
 
 impl System {
@@ -28,7 +28,7 @@ impl System {
     })
   }
 
-  pub fn discover(mut self) -> impl Iterator<Item = SpeakerEvent> {
+  pub fn discover(mut self) -> impl Iterator<Item = SystemEvent> {
     let socket = UdpSocket::bind("0.0.0.0:0")
       .expect("Failed to create socket");
     let responses = send_ssdp_request(
@@ -56,12 +56,12 @@ impl System {
                   }
                 }
 
-                Some(SpeakerEvent::Found(speaker))
+                Some(SystemEvent::Found(speaker))
               },
-              Err(e) => Some(SpeakerEvent::Error(e.to_string()))
+              Err(e) => Some(SystemEvent::Error(e.to_string()))
             }
           },
-          Err(e) => Some(SpeakerEvent::Error(e.to_string())),
+          Err(e) => Some(SystemEvent::Error(e.to_string())),
         }
       })
   }

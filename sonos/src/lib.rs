@@ -7,6 +7,7 @@ pub use client::Client;
 
 mod system;
 pub use system::System;
+pub use system::SystemEvent;
 
 mod speaker;
 pub use speaker::Speaker;

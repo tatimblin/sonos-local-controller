@@ -1,20 +1,18 @@
 use std::sync::{ Arc, Mutex };
 use crate::types::*;
 
-use super::reducers;
+use super::reducers::{ AppAction, app_reducer };
 
 pub struct AppState {
   pub view: View,
-  pub selected_group_name: Option<String>,
-  pub selected_speaker_index: Option<usize>,
+  pub status_message: String,
 }
 
 impl Default for AppState {
   fn default() -> Self {
     Self {
       view: View::Startup,
-      selected_group_name: None, 
-      selected_speaker_index: None,
+      status_message: "loading...".to_owned(),
     }
   }
 }
@@ -32,13 +30,10 @@ impl Store {
 
   pub fn dispatch(&self, action: AppAction) {
     let mut state = self.state.lock().unwrap();
-    reducers::app_reducer(&mut state, action);
+    app_reducer(&mut state, action);
   }
 
-  pub fn with_state<F, T>(&self, f: F) -> T
-  where 
-    F: FnOnce(&AppState) -> T
-  {
+  pub fn with_state<F, T>(&self, f: F) -> T where F: FnOnce(&AppState) -> T {
     let state = self.state.lock().unwrap();
     f(&state)
   }

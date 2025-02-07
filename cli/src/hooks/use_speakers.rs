@@ -1,15 +1,20 @@
-use std::io;
-use sonos::System;
-use crate::state::store::Store;
-// use crate::types::AppAction;
+use std::io::Result;
 
-pub fn use_speakers(_: &Store, mut render_callback: impl FnMut() -> io::Result<()>) -> io::Result<()> {
+use sonos::{ SystemEvent, System };
+
+use crate::state::store::Store;
+use crate::state::reducers::AppAction;
+
+pub fn use_speakers(store: &Store, mut render_callback: impl FnMut() -> Result<()>) -> Result<()> {
   let system = System::new()?;
 
-  for _ in system.discover() {
-    // store.dispatch(AppAction::AddSpeaker(_));
-    render_callback()?;
-  }
-
-  Ok(())
+  Ok(for event in system.discover() {
+    match event {
+      SystemEvent::Found(speaker) => {
+        store.dispatch(AppAction::SetStatusMessage(speaker.name().to_string()));
+        render_callback()?;
+      },
+      _ => {}
+    }
+  })
 }
