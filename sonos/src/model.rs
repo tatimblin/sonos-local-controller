@@ -49,7 +49,7 @@ pub enum Action {
   GetVolume,
   SetVolume,
   SetRelativeVolume,
-  GetZoneGroupTopology,
+  GetZoneGroupState,
 }
 
 impl Action {
@@ -68,7 +68,7 @@ impl Action {
       Action::GetVolume => "GetVolume",
       Action::SetVolume => "SetVolume",
       Action::SetRelativeVolume => "SetRelativeVolume",
-      Action::GetZoneGroupTopology => "GetZoneGroupTopology",
+      Action::GetZoneGroupState => "GetZoneGroupState",
     }
   }
 
@@ -81,7 +81,7 @@ impl Action {
       | Action::SetVolume
       | Action::SetRelativeVolume
       => Service::rendering_control(),
-      Action::GetZoneGroupTopology
+      Action::GetZoneGroupState
       => Service::zone_group_topology(),
     }
   }
