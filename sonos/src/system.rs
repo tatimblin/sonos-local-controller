@@ -49,12 +49,10 @@ impl System {
               Ok(speaker) => {
 
                 if is_first_speaker {
-                  is_first_speaker = false;
-                  if let Ok(topology) = Topology::from_ip(&speaker.ip()) {
-                    // self.topology = Some(topology);
-                    println!("{:?}", topology)
-                  }
+                  is_first_speaker = self.set_topology_from_ip(speaker.ip());
                 }
+
+                self.add_speaker(speaker.to_owned());
 
                 Some(SystemEvent::Found(speaker))
               },
@@ -64,5 +62,17 @@ impl System {
           Err(e) => Some(SystemEvent::Error(e.to_string())),
         }
       })
+  }
+
+  fn add_speaker(&mut self, speaker: Speaker) {
+    self.speakers.insert(speaker.uuid().to_string(), speaker);
+  }
+
+  fn set_topology_from_ip(&mut self, ip: &str) -> bool {
+    if let Ok(topology) = Topology::from_ip(ip) {
+      self.topology = Some(topology);
+      return true;
+    }
+    false
   }
 }
