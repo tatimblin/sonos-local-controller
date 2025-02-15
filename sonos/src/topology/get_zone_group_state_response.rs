@@ -7,46 +7,46 @@ use crate::{model::Action, Client, SonosError};
 #[serde(rename_all = "PascalCase")]
 pub struct GetZoneGroupStateResponse {
     #[serde(rename = "ZoneGroupState")]
-    zone_group_state: ZoneGroupStateWrapper,
+    pub zone_group_state: ZoneGroupStateWrapper,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-struct ZoneGroupStateWrapper {
+pub struct ZoneGroupStateWrapper {
     #[serde(rename = "ZoneGroupState")]
-    zone_group_state: ZoneGroupState,
+    pub zone_group_state: ZoneGroupState,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-struct ZoneGroupState {
-    zone_groups: ZoneGroups,
+pub struct ZoneGroupState {
+    pub zone_groups: ZoneGroups,
     vanished_devices: Option<VanishedDevices>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-struct ZoneGroups {
-    zone_group: Vec<ZoneGroup>,
+pub struct ZoneGroups {
+    pub zone_group: Vec<ZoneGroup>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-struct ZoneGroup {
+pub struct ZoneGroup {
     #[serde(rename = "Coordinator")]
     coordinator: String,
     #[serde(rename = "ID")]
-    id: String,
-    zone_group_member: Vec<ZoneGroupMember>,
+    pub id: String,
+    pub zone_group_member: Vec<ZoneGroupMember>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-struct ZoneGroupMember {
+pub struct ZoneGroupMember {
     #[serde(rename = "UUID")]
-    uuid: String,
+    pub uuid: String,
     location: String,
-    zone_name: String,
+    pub zone_name: String,
     icon: String,
     configuration: u8,
     software_version: String,

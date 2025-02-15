@@ -49,7 +49,7 @@ impl System {
               Ok(speaker) => {
 
                 if is_first_speaker {
-                  is_first_speaker = self.set_topology_from_ip(speaker.ip());
+                  is_first_speaker = self.set_topology(speaker.ip());
                 }
 
                 self.add_speaker(speaker.to_owned());
@@ -68,7 +68,7 @@ impl System {
     self.speakers.insert(speaker.uuid().to_string(), speaker);
   }
 
-  fn set_topology_from_ip(&mut self, ip: &str) -> bool {
+  fn set_topology(&mut self, ip: &str) -> bool {
     if let Ok(topology) = Topology::from_ip(ip) {
       self.topology = Some(topology);
       return true;

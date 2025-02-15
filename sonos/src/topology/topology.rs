@@ -1,17 +1,36 @@
+use std::collections::HashMap;
+
 use crate::SonosError;
 
+use crate::topology::group::Group;
 use super::get_zone_group_state_response::GetZoneGroupStateResponse;
 
+#[derive(Debug)]
 pub struct Topology {
-
+  groups: HashMap<String, Group>,
 }
 
 impl Topology {
   pub fn from_ip(ip: &str) -> Result<Self, SonosError> {
-    let get_zone_group_state_response = GetZoneGroupStateResponse::from_ip(ip);
+    match GetZoneGroupStateResponse::from_ip(ip) {
+      Ok(response) => Self::parse_response(response),
+      Err(err) => Err(err),
+    }
+  }
 
-    println!("{:?}", get_zone_group_state_response);
+  fn parse_response(response: GetZoneGroupStateResponse) -> Result<Self, SonosError> {
+    let topology = Self {
+      groups: HashMap::new(),
+    };
 
-    Ok(Topology{})
+    
+
+    Ok(topology)
+  }
+
+  pub fn create_group(&mut self, name: &str) {
+    self.groups.insert(name.to_owned(), Group {
+      name: name.to_owned(),
+    });
   }
 }
