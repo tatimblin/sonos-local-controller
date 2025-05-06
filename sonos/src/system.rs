@@ -3,6 +3,8 @@ use std::{
   net::UdpSocket,
   io::Result,
 };
+use std::thread;
+use std::time::Duration;
 
 use crate::topology::Topology;
 use crate::Speaker;
@@ -16,8 +18,8 @@ pub struct System {
 #[derive(Debug)]
 pub enum SystemEvent {
   Found(Speaker),
-  GroupUpdate(String, Vec<String>),
   Error(String),
+  GroupUpdate(String, Vec<String>),
 }
 
 impl System {
@@ -28,7 +30,7 @@ impl System {
     })
   }
 
-  pub fn discover(mut self) -> impl Iterator<Item = SystemEvent> {
+  pub fn discover(self) -> impl Iterator<Item = SystemEvent> {
     let socket = UdpSocket::bind("0.0.0.0:0")
       .expect("Failed to create socket");
     let responses = send_ssdp_request(
@@ -42,17 +44,20 @@ impl System {
 
     responses
       .filter(|response| response.is_ok())
-      .filter_map(move |response| {
+      .flat_map(move |response| {
         match response {
           Ok(ssdp) => {
             match Speaker::from_location(&ssdp.location) {
               Ok(speaker) => {
-
+                
                 if is_first_speaker {
                   is_first_speaker = false;
                   if let Ok(topology) = Topology::from_ip(&speaker.ip()) {
-                    // self.topology = Some(topology);
-                    println!("{:?}", topology)
+                    println!("TESting");
+                    println!("{:?}", topology);
+                    thread::sleep(Duration::from_secs(10));
+                    println!("TESting");
+                    thread::sleep(Duration::from_secs(10));
                   }
                 }
 

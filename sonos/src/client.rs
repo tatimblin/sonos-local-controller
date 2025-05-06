@@ -70,7 +70,7 @@ impl Client {
           Ok(self.get_child_element(body, &format!("{}Response", action.name()))?.clone())
         }
       }
-      Err(e) => Err(SonosError::BadResponse(400)), // TODO: Use proper code
+      Err(_e) => Err(SonosError::BadResponse(400)), // TODO: Use proper code
     }
   }
   

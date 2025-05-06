@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use serde_derive::Deserialize;
+use xmltree::Element;
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -7,16 +8,86 @@ use crate::{model::Action, Client, SonosError};
 
 // START
 
+#[derive(Debug, Deserialize)]
+#[serde(rename = "GetZoneGroupStateResponse")]
+struct GetZoneGroupStateResponse {
+    #[serde(rename = "ZoneGroupState")]
+    zone_group_state: ZoneGroupStateWrapper,
+}
 
+#[derive(Debug, Deserialize)]
+struct ZoneGroupStateWrapper {
+    #[serde(rename = "ZoneGroupState")]
+    zone_group_state: ZoneGroupState,
+}
+
+
+#[derive(Debug, Deserialize)]
+struct ZoneGroupState {
+    #[serde(rename = "ZoneGroups")]
+    zone_groups: ZoneGroups,
+    
+    #[serde(rename = "VanishedDevices")]
+    vanished_devices: Option<VanishedDevices>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZoneGroups {
+    #[serde(rename = "ZoneGroup")]
+    zone_group: Vec<ZoneGroup>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZoneGroup {
+    #[serde(rename = "@Coordinator")]
+    coordinator: String,
+
+    #[serde(rename = "@ID")]
+    id: String,
+
+    #[serde(rename = "ZoneGroupMember")]
+    members: Vec<ZoneGroupMember>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZoneGroupMember {
+    #[serde(rename = "@UUID")]
+    uuid: String,
+
+    #[serde(rename = "@Location")]
+    location: String,
+
+    #[serde(rename = "@ZoneName")]
+    zone_name: String,
+
+    #[serde(rename = "@SoftwareVersion")]
+    software_version: String,
+
+    #[serde(rename = "Satellite")]
+    satellites: Option<Vec<Satellite>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Satellite {
+    #[serde(rename = "@UUID")]
+    uuid: String,
+
+    #[serde(rename = "@Location")]
+    location: String,
+
+    #[serde(rename = "@ZoneName")]
+    zone_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct VanishedDevices {}
 
 // END
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Deserialize)]
 pub struct Topology {
-  pub players: Vec<Player>,
-  pub groups: Vec<Group>,
-  pub household_id: String,
+  #[serde(rename = "GetZoneGroupStateResponse")]
+  boop: GetZoneGroupStateResponse,
 }
 
 impl Topology {
@@ -24,10 +95,9 @@ impl Topology {
     let client = Client::default();
     let payload = "<InstanceID>0</InstanceID>";
 
-    println!("Sending GetZoneGroupTopology to {}", ip);
-
     match client.send_action(ip, Action::GetZoneGroupState, payload) {
       Ok(response) => {
+        // log to file?
         let mut file = OpenOptions::new()
           .create(true)
           .append(true)
@@ -35,6 +105,7 @@ impl Topology {
           .expect("Failed to open log file");
 
         let _ = file.write_all(element_to_str(&response).as_bytes());
+        // end log to file?
 
         match Self::from_xml(&element_to_str(&response)) {
           Ok(topology) => Ok(topology),
