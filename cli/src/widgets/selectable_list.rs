@@ -56,6 +56,10 @@ impl SelectableList {
   pub fn selected(&self) -> Option<usize> {
     self.state.selected()
   }
+
+  pub fn len(&self) -> usize {
+    self.items.len()
+  }
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 use std::fs;
-use sonos::{Speaker, SonosError};
+use sonos::{Speaker, SpeakerFactory, SpeakerTrait, SonosError};
 
 // cargo test --test speaker_info_tests
 

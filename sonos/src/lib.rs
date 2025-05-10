@@ -9,11 +9,17 @@ mod system;
 pub use system::System;
 pub use system::SystemEvent;
 
-mod speaker;
-pub use speaker::Speaker;
+pub mod speaker;
+pub use speaker::{Speaker, SpeakerFactory, SpeakerTrait};
 
 mod util;
 pub use util::ssdp;
 
 mod error;
 pub use error::SonosError;
+
+#[cfg(feature = "mock")]
+pub mod testing {
+  pub use crate::speaker::mock::MockSpeaker;
+  pub use crate::speaker::mock::MockSpeakerBuilder;
+}

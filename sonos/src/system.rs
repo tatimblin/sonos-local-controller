@@ -7,11 +7,11 @@ use std::thread;
 use std::time::Duration;
 
 use crate::topology::Topology;
-use crate::Speaker;
+use crate::speaker::{Speaker, SpeakerFactory, SpeakerTrait};
 use crate::util::ssdp::send_ssdp_request;
 
 pub struct System {
-  speakers: HashMap<String, Speaker>,
+  speakers: HashMap<String, Box<dyn SpeakerTrait>>,
   topology: Option<Topology>,
 }
 
