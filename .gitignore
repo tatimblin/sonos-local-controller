@@ -1,1 +1,6 @@
 /target
+/.kiro
+
+sonos_debug.log
+decoded_topology.xml
+log.txt

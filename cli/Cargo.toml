@@ -9,3 +9,5 @@ crossterm = "0.28.1"
 ratatui = "0.28.1"
 sonos = { path = "../sonos", features = ["mock"] }
 rand = "0.8"
+log = "0.4"
+simplelog = "0.12"

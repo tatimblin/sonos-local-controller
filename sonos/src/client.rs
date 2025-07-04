@@ -1,6 +1,7 @@
 use ureq::{ Agent, Response };
 use xmltree::Element;
 use std::borrow::Cow;
+use log::{info, warn, error, debug};
 
 use crate::SonosError;
 use crate::model::Action;
@@ -16,6 +17,10 @@ impl Client {
   }
 
   pub fn send_action(&self, ip: &str, action: Action, payload: &str) -> Result<Element, SonosError> {
+    debug!("Preparing SOAP request for action: {:?}", action);
+    debug!("Target IP: {}", ip);
+    debug!("Payload: {}", payload);
+    
     let body = format!(r#"
       <s:Envelope
         xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
@@ -35,27 +40,51 @@ impl Client {
 
     let soap_action = format!("\"{}#{}\"", action.service(), action.name());
     let url = format!("http://{}:1400/{}", ip, action.endpoint());
+    
+    debug!("SOAP Action: {}", soap_action);
+    debug!("URL: {}", url);
+    debug!("Request body length: {} characters", body.len());
 
+    info!("Sending HTTP POST request to {}...", url);
     let response = self.agent.post(&url)
       .set("Content-Type", "text/xml; charset=\"utf-8\"")
       .set("SOAPACTION", &soap_action)
       .send_string(&body);
 
     match response {
-      Ok(response) => self.parse_xml_response(response, action),
-      Err(_) => Err(SonosError::DeviceUnreachable),
+      Ok(response) => {
+        info!("Received HTTP response with status: {}", response.status());
+        self.parse_xml_response(response, action)
+      },
+      Err(e) => {
+        error!("HTTP request failed: {:?}", e);
+        Err(SonosError::DeviceUnreachable)
+      },
     }
   }
 
   fn parse_xml_response(&self, response: Response, action: Action) -> Result<Element, SonosError> {
+    debug!("Parsing XML response...");
+    
     match response.into_string() {
       Ok(xml_string) => {
+        debug!("Response body length: {} characters", xml_string.len());
+        debug!("First 200 chars of response: {}", 
+                 if xml_string.len() > 200 { &xml_string[..200] } else { &xml_string });
+        
+        debug!("Parsing XML...");
         let xml = Element::parse(xml_string.as_bytes())
-          .map_err(|e| SonosError::ParseError(format!("Failed to parse XML: {}", e)))?;
+          .map_err(|e| {
+            error!("Failed to parse XML: {}", e);
+            SonosError::ParseError(format!("Failed to parse XML: {}", e))
+          })?;
   
+        debug!("Successfully parsed XML, looking for Body element...");
         let body = self.get_child_element(&xml, "Body")?;
+        debug!("Found Body element");
   
         if let Some(fault) = body.get_child("Fault") {
+          warn!("Found SOAP Fault in response");
           let error_code = fault
             .get_child("detail")
             .and_then(|c| c.get_child("UpnPError"))
@@ -65,12 +94,28 @@ impl Client {
             .parse::<u16>()
             .map_err(|_| SonosError::ParseError("Invalid error code format".to_string()))?;
   
+          error!("SOAP Fault error code: {}", error_code);
           Err(SonosError::BadResponse(error_code))
         } else {
-          Ok(self.get_child_element(body, &format!("{}Response", action.name()))?.clone())
+          let response_element_name = format!("{}Response", action.name());
+          debug!("Looking for response element: {}", response_element_name);
+          
+          match self.get_child_element(body, &response_element_name) {
+            Ok(response_element) => {
+              debug!("Successfully found response element");
+              Ok(response_element.clone())
+            },
+            Err(e) => {
+              error!("Failed to find response element: {:?}", e);
+              Err(e)
+            }
+          }
         }
       }
-      Err(_e) => Err(SonosError::BadResponse(400)), // TODO: Use proper code
+      Err(e) => {
+        error!("Failed to convert response to string: {:?}", e);
+        Err(SonosError::BadResponse(400)) // TODO: Use proper code
+      }
     }
   }
   

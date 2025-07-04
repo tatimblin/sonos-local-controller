@@ -8,6 +8,8 @@ use std::io;
 use std::sync::Arc;
 use crossterm::event::{ self, KeyCode, KeyEvent };
 use ratatui::DefaultTerminal;
+use simplelog::*;
+use std::fs::File;
 
 use crate::state::store::Store;
 use crate::hooks::use_speakers::use_speakers;
@@ -66,6 +68,17 @@ impl App {
 }
 
 fn main() -> io::Result<()> {
+  // Initialize logger to write to file in the root directory
+  CombinedLogger::init(
+    vec![
+      WriteLogger::new(
+        LevelFilter::Debug,
+        Config::default(),
+        File::create("../sonos_debug.log").unwrap(),
+      ),
+    ]
+  ).unwrap();
+
   let mut terminal = ratatui::init();
   let app_result = App::new().run(&mut terminal);
   ratatui::restore();
