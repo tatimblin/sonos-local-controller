@@ -1,6 +1,7 @@
 mod model;
 
-mod topology;
+pub mod topology;
+pub use topology::{Topology, ZoneGroup, ZoneGroupMember, Satellite, VanishedDevices, VanishedDevice};
 
 mod client;
 pub use client::Client;
