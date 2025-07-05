@@ -20,6 +20,17 @@ impl SpeakerList {
     }
   }
 
+  pub fn from_names(speaker_names: &[String]) -> Self {
+    let labels: Vec<String> = speaker_names
+      .iter()
+      .map(|name| format!("Speaker: {}", name))
+      .collect();
+
+    Self {
+      list: SelectableList::new("Speakers", labels),
+    }
+  }
+
   pub fn draw(&mut self, frame: &mut Frame) {
     self.list.draw(frame, frame.area());
   }

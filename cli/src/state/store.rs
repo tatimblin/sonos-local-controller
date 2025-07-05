@@ -6,6 +6,7 @@ use super::reducers::{ AppAction, app_reducer };
 pub struct AppState {
   pub view: View,
   pub status_message: String,
+  pub topology: Option<Topology>,
 }
 
 impl Default for AppState {
@@ -13,6 +14,7 @@ impl Default for AppState {
     Self {
       view: View::Startup,
       status_message: "loading...".to_owned(),
+      topology: None,
     }
   }
 }
