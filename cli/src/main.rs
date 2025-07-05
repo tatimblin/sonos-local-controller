@@ -93,7 +93,7 @@ fn main() -> io::Result<()> {
       WriteLogger::new(
         LevelFilter::Debug,
         Config::default(),
-        File::create("../sonos_debug.log").unwrap(),
+        File::create("sonos_debug.log").unwrap(),
       ),
     ]
   ).unwrap();
