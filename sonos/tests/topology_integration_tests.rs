@@ -1,5 +1,5 @@
 use sonos::topology::{Topology, get_topology_from_ip};
-use sonos::SonosError;
+use sonos::{SonosError, System, SystemEvent, SpeakerTrait};
 
 // Import real topology response from test data file
 const REAL_TOPOLOGY_RESPONSE: &str = include_str!("./topology_integration_tests_data.txt");
@@ -278,4 +278,421 @@ fn test_network_function_signatures() {
     use sonos::topology::TopologyClient;
     let _client = TopologyClient::new();
     let _client_with_custom = TopologyClient::with_client(sonos::Client::new(ureq::Agent::new()));
+}
+
+// Integration tests for System topology integration
+#[cfg(test)]
+mod system_integration_tests {
+    use super::*;
+
+    #[test]
+    fn test_system_discover_method_signature() {
+        // Test that System::discover uses &mut self instead of consuming self
+        let mut system = System::new().expect("Failed to create system");
+        
+        // Call discover and consume the iterator
+        {
+            let discovery_iter = system.discover();
+            let _events: Vec<_> = discovery_iter.collect();
+        }
+        
+        // System should still be accessible after discovery (not consumed)
+        let _speakers = system.speakers();
+        let _count = system.speaker_count();
+        let _has_topology = system.has_topology();
+        
+        // Should be able to call discover again
+        {
+            let discovery_iter2 = system.discover();
+            let _events2: Vec<_> = discovery_iter2.collect();
+        }
+        
+        // System should still be accessible
+        assert_eq!(system.speakers().len(), system.speaker_count());
+    }
+
+    #[test]
+    fn test_system_event_types_compatibility() {
+        // Test that all expected event types exist and are properly named
+        let mut system = System::new().expect("Failed to create system");
+        
+        let events: Vec<_> = system.discover().collect();
+        
+        // Verify event types are correct (no old "Found" events)
+        for event in &events {
+            match event {
+                SystemEvent::SpeakerFound(_) => {
+                    // This is the correct new event name
+                },
+                SystemEvent::TopologyReady(_) => {
+                    // New topology event
+                },
+                SystemEvent::DiscoveryComplete => {
+                    // New completion event
+                },
+                SystemEvent::Error(_) => {
+                    // Error events should be generic, not topology-specific
+                },
+                SystemEvent::GroupUpdate(_, _) => {
+                    // Group update events (not used in discovery but valid)
+                },
+                // Note: No SystemEvent::Found variant should exist anymore
+            }
+        }
+        
+        // Should always have DiscoveryComplete as the last event
+        assert!(!events.is_empty(), "Should have at least DiscoveryComplete event");
+        assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+    }
+
+    #[test]
+    fn test_complete_discovery_flow_with_topology_integration() {
+        let mut system = System::new().expect("Failed to create system");
+        
+        // Initial state should be empty
+        assert_eq!(system.speaker_count(), 0);
+        assert!(!system.has_topology());
+        assert!(system.topology().is_none());
+        
+        // Run discovery
+        let events: Vec<_> = system.discover().collect();
+        
+        // Analyze the discovery flow
+        let speaker_events: Vec<_> = events.iter()
+            .filter(|e| matches!(e, SystemEvent::SpeakerFound(_)))
+            .collect();
+        
+        let topology_events: Vec<_> = events.iter()
+            .filter(|e| matches!(e, SystemEvent::TopologyReady(_)))
+            .collect();
+        
+        let error_events: Vec<_> = events.iter()
+            .filter(|e| matches!(e, SystemEvent::Error(_)))
+            .collect();
+        
+        let completion_events: Vec<_> = events.iter()
+            .filter(|e| matches!(e, SystemEvent::DiscoveryComplete))
+            .collect();
+        
+        // Verify completion event
+        assert_eq!(completion_events.len(), 1, "Should have exactly one DiscoveryComplete event");
+        assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+        
+        // If speakers were found, verify integration
+        if !speaker_events.is_empty() {
+            // Speakers should be stored in the system
+            assert!(system.speaker_count() > 0, "Speakers should be stored in system");
+            
+            // Topology should have been attempted (either success or error)
+            let topology_attempted = !topology_events.is_empty() || 
+                error_events.iter().any(|e| {
+                    if let SystemEvent::Error(msg) = e {
+                        msg.contains("Topology retrieval failed")
+                    } else {
+                        false
+                    }
+                });
+            
+            assert!(topology_attempted, "Topology retrieval should have been attempted");
+            
+            // If topology was successful, it should be stored
+            if !topology_events.is_empty() {
+                assert!(system.has_topology(), "Topology should be stored when TopologyReady event emitted");
+                assert!(system.topology().is_some(), "Topology should be accessible");
+                
+                // Verify topology data integrity
+                let topology = system.topology().unwrap();
+                assert!(topology.zone_group_count() > 0, "Topology should have zone groups");
+            }
+            
+            // Verify speakers can be accessed by UUID
+            for event in &speaker_events {
+                if let SystemEvent::SpeakerFound(speaker) = event {
+                    let uuid = speaker.uuid();
+                    let stored_speaker = system.get_speaker_by_uuid(uuid);
+                    assert!(stored_speaker.is_some(), "Speaker should be retrievable by UUID: {}", uuid);
+                    assert_eq!(stored_speaker.unwrap().uuid(), uuid);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_system_remains_usable_after_discovery() {
+        let mut system = System::new().expect("Failed to create system");
+        
+        // Run discovery multiple times to verify system remains usable
+        for iteration in 0..3 {
+            let events: Vec<_> = system.discover().collect();
+            
+            // System should be usable after each discovery
+            let speaker_count = system.speaker_count();
+            let has_topology = system.has_topology();
+            let speakers_ref = system.speakers();
+            
+            // Should be able to access all state methods
+            assert_eq!(speakers_ref.len(), speaker_count);
+            
+            if has_topology {
+                let topology = system.topology();
+                assert!(topology.is_some());
+            }
+            
+            // Should always have completion event
+            assert!(!events.is_empty(), "Iteration {} should have events", iteration);
+            assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+            
+            // Test speaker lookup functionality
+            for (uuid, _) in speakers_ref.iter() {
+                let found_speaker = system.get_speaker_by_uuid(uuid);
+                assert!(found_speaker.is_some(), "Should find speaker by UUID: {}", uuid);
+            }
+        }
+    }
+
+    #[test]
+    fn test_error_handling_scenarios_for_topology_retrieval() {
+        let mut system = System::new().expect("Failed to create system");
+        
+        let events: Vec<_> = system.discover().collect();
+        
+        // Check for topology-related errors
+        let topology_errors: Vec<_> = events.iter()
+            .filter(|e| {
+                if let SystemEvent::Error(msg) = e {
+                    msg.contains("Topology retrieval failed") || msg.contains("topology")
+                } else {
+                    false
+                }
+            })
+            .collect();
+        
+        let speaker_events: Vec<_> = events.iter()
+            .filter(|e| matches!(e, SystemEvent::SpeakerFound(_)))
+            .collect();
+        
+        // If there were topology errors, verify they don't stop speaker discovery
+        if !topology_errors.is_empty() && !speaker_events.is_empty() {
+            // Speakers should still be stored even if topology failed
+            assert!(system.speaker_count() > 0, "Speakers should be stored even if topology fails");
+            
+            // System should still be functional
+            assert!(!system.speakers().is_empty());
+            
+            // Topology should not be available
+            assert!(!system.has_topology());
+            assert!(system.topology().is_none());
+        }
+        
+        // Verify error events use generic Error type (not TopologyError)
+        for error_event in &topology_errors {
+            assert!(matches!(error_event, SystemEvent::Error(_)), 
+                   "Topology errors should use generic Error event type");
+        }
+        
+        // Discovery should complete even with errors
+        assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+    }
+
+    #[test]
+    fn test_state_access_methods_integration() {
+        let mut system = System::new().expect("Failed to create system");
+        
+        // Test initial state
+        assert_eq!(system.speaker_count(), 0);
+        assert!(!system.has_topology());
+        assert!(system.topology().is_none());
+        assert!(system.speakers().is_empty());
+        assert!(system.get_speaker_by_uuid("any-uuid").is_none());
+        
+        // Run discovery
+        let events: Vec<_> = system.discover().collect();
+        
+        // Test state after discovery
+        let final_speaker_count = system.speaker_count();
+        let final_has_topology = system.has_topology();
+        let final_speakers = system.speakers();
+        let final_topology = system.topology();
+        
+        // Verify consistency between methods
+        assert_eq!(final_speakers.len(), final_speaker_count);
+        assert_eq!(final_topology.is_some(), final_has_topology);
+        
+        // Test speaker lookup for all stored speakers
+        for (uuid, speaker) in final_speakers.iter() {
+            let found_speaker = system.get_speaker_by_uuid(uuid);
+            assert!(found_speaker.is_some(), "Should find speaker by UUID: {}", uuid);
+            assert_eq!(found_speaker.unwrap().uuid(), speaker.uuid());
+        }
+        
+        // Test edge cases for speaker lookup
+        assert!(system.get_speaker_by_uuid("").is_none());
+        assert!(system.get_speaker_by_uuid("NONEXISTENT_UUID").is_none());
+        
+        // If topology is available, verify its data
+        if let Some(topology) = final_topology {
+            assert!(topology.zone_group_count() > 0);
+            
+            // Verify topology-speaker integration
+            let all_topology_speakers = topology.all_speakers();
+            for topology_speaker in &all_topology_speakers {
+                // Each speaker in topology should be findable in the system
+                let system_speaker = system.get_speaker_by_uuid(&topology_speaker.uuid);
+                if system_speaker.is_some() {
+                    // If found, UUIDs should match
+                    assert_eq!(system_speaker.unwrap().uuid(), topology_speaker.uuid);
+                }
+            }
+        }
+        
+        // Verify discovery completed
+        assert!(!events.is_empty());
+        assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+    }
+
+    #[test]
+    fn test_backward_compatibility_verification() {
+        // Test that the new API maintains expected behavior patterns
+        let mut system = System::new().expect("Failed to create system");
+        
+        // Old pattern: system.discover().collect() should still work
+        let events: Vec<_> = system.discover().collect();
+        
+        // System should remain available (this is the key backward compatibility improvement)
+        let _post_discovery_speakers = system.speakers();
+        let _post_discovery_count = system.speaker_count();
+        
+        // Event types should be consistent with new naming
+        let has_speaker_found = events.iter().any(|e| matches!(e, SystemEvent::SpeakerFound(_)));
+        let has_discovery_complete = events.iter().any(|e| matches!(e, SystemEvent::DiscoveryComplete));
+        
+        // Should have completion event
+        assert!(has_discovery_complete, "Should have DiscoveryComplete event");
+        
+        // If speakers were found, verify they use the new event name
+        if has_speaker_found {
+            // Verify no old "Found" events exist (this would be a compilation error anyway)
+            // The fact that we can match on SpeakerFound proves the rename worked
+            
+            for event in &events {
+                if let SystemEvent::SpeakerFound(speaker) = event {
+                    // Verify speaker data is accessible
+                    assert!(!speaker.uuid().is_empty());
+                    assert!(!speaker.name().is_empty());
+                    assert!(!speaker.ip().is_empty());
+                }
+            }
+        }
+        
+        // Test that multiple discoveries work (system not consumed)
+        let events2: Vec<_> = system.discover().collect();
+        assert!(!events2.is_empty());
+        assert!(matches!(events2.last().unwrap(), SystemEvent::DiscoveryComplete));
+        
+        // System should still be accessible
+        let _final_state = (system.speaker_count(), system.has_topology());
+    }
+
+    #[test]
+    fn test_event_emission_order_and_consistency() {
+        let mut system = System::new().expect("Failed to create system");
+        
+        let events: Vec<_> = system.discover().collect();
+        
+        // Track event order
+        let mut speaker_found_indices = Vec::new();
+        let mut topology_ready_indices = Vec::new();
+        let mut error_indices = Vec::new();
+        let mut discovery_complete_index = None;
+        
+        for (i, event) in events.iter().enumerate() {
+            match event {
+                SystemEvent::SpeakerFound(_) => speaker_found_indices.push(i),
+                SystemEvent::TopologyReady(_) => topology_ready_indices.push(i),
+                SystemEvent::Error(_) => error_indices.push(i),
+                SystemEvent::DiscoveryComplete => {
+                    assert!(discovery_complete_index.is_none(), "Should have only one DiscoveryComplete event");
+                    discovery_complete_index = Some(i);
+                },
+                SystemEvent::GroupUpdate(_, _) => {
+                    // Group updates are valid but not expected during discovery
+                }
+            }
+        }
+        
+        // DiscoveryComplete should always be present and last
+        assert!(discovery_complete_index.is_some(), "Should have DiscoveryComplete event");
+        assert_eq!(discovery_complete_index.unwrap(), events.len() - 1, "DiscoveryComplete should be last event");
+        
+        // If topology was retrieved, it should come after at least one speaker
+        if !topology_ready_indices.is_empty() && !speaker_found_indices.is_empty() {
+            let first_topology = topology_ready_indices[0];
+            let first_speaker = speaker_found_indices[0];
+            // Topology should come after first speaker (or at least not before)
+            assert!(first_topology >= first_speaker, 
+                   "TopologyReady should come after first SpeakerFound event");
+        }
+        
+        // All events should come before DiscoveryComplete
+        let completion_index = discovery_complete_index.unwrap();
+        for &speaker_index in &speaker_found_indices {
+            assert!(speaker_index < completion_index, "SpeakerFound events should come before DiscoveryComplete");
+        }
+        for &topology_index in &topology_ready_indices {
+            assert!(topology_index < completion_index, "TopologyReady events should come before DiscoveryComplete");
+        }
+        for &error_index in &error_indices {
+            assert!(error_index < completion_index, "Error events should come before DiscoveryComplete");
+        }
+    }
+
+    #[test]
+    fn test_topology_integration_with_speaker_storage() {
+        let mut system = System::new().expect("Failed to create system");
+        
+        let events: Vec<_> = system.discover().collect();
+        
+        let speaker_events: Vec<_> = events.iter()
+            .filter_map(|e| if let SystemEvent::SpeakerFound(speaker) = e { Some(speaker) } else { None })
+            .collect();
+        
+        let topology_events: Vec<_> = events.iter()
+            .filter_map(|e| if let SystemEvent::TopologyReady(topology) = e { Some(topology) } else { None })
+            .collect();
+        
+        // If both speakers and topology were found, verify integration
+        if !speaker_events.is_empty() && !topology_events.is_empty() {
+            let topology = topology_events[0];
+            
+            // Verify topology is stored in system
+            assert!(system.has_topology());
+            let stored_topology = system.topology().unwrap();
+            assert_eq!(stored_topology.zone_group_count(), topology.zone_group_count());
+            
+            // Verify speakers are stored and accessible
+            assert!(system.speaker_count() > 0);
+            
+            // Test integration: speakers in topology should be findable in system
+            let topology_speakers = topology.all_speakers();
+            for topology_speaker in &topology_speakers {
+                let system_speaker = system.get_speaker_by_uuid(&topology_speaker.uuid);
+                // Note: Not all topology speakers may be in the system if discovery is still ongoing
+                // But if they are found, they should match
+                if let Some(found_speaker) = system_speaker {
+                    assert_eq!(found_speaker.uuid(), topology_speaker.uuid);
+                }
+            }
+            
+            // Test that system speakers have valid UUIDs that could be used with topology
+            for (uuid, speaker) in system.speakers().iter() {
+                assert_eq!(uuid, speaker.uuid());
+                assert!(!uuid.is_empty());
+                assert!(uuid.starts_with("RINCON_") || uuid.contains("uuid:"), 
+                       "Speaker UUID should be in expected format: {}", uuid);
+            }
+        }
+        
+        // Verify discovery completed properly
+        assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+    }
 }
