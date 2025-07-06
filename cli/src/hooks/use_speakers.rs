@@ -7,6 +7,48 @@ use crate::state::store::Store;
 use crate::state::reducers::AppAction;
 use crate::types::{Topology, Group};
 
+pub fn use_speakers(store: &Store, mut render_callback: impl FnMut() -> io::Result<()>) -> io::Result<()> {
+  let mut system = System::new()?;
+
+  Ok(for event in system.discover() {
+    match event {
+      SystemEvent::SpeakerFound(speaker) => {
+        store.dispatch(AppAction::SetStatusMessage(speaker.name().to_owned()));
+        render_callback()?;
+      },
+      SystemEvent::TopologyReady(sonos_topology) => {
+        debug!("TopologyReady event received");
+        
+        // Transform sonos topology to CLI topology structure with error handling
+        match transform_topology(&sonos_topology) {
+          Ok(cli_topology) => {
+            debug!("Topology transformation successful, dispatching SetTopology action");
+            
+            // Dispatch SetTopology action to update the store
+            store.dispatch(AppAction::SetTopology(cli_topology));
+            
+            // Update status message to indicate topology is ready
+            store.dispatch(AppAction::SetStatusMessage("Topology loaded".to_string()));
+          }
+          Err(err) => {
+            error!("Failed to transform topology: {}", err);
+            
+            // Update status message to indicate the error, but allow app to continue
+            store.dispatch(AppAction::SetStatusMessage(
+              format!("Topology error: {}", err)
+            ));
+            
+            // Don't return early - let the application continue functioning
+          }
+        }
+        
+        render_callback()?;
+      }
+      _ => {}
+    }
+  })
+}
+
 /// Transforms a sonos topology into a simplified CLI topology structure
 /// Returns Ok(Topology) on success, or Err(String) with error description on failure
 fn transform_topology(sonos_topology: &sonos::topology::Topology) -> Result<Topology, String> {
@@ -103,48 +145,6 @@ fn get_fallback_group_name(zone_group: &sonos::topology::ZoneGroup, index: usize
         warn!("Zone group at index {} has members but no valid names", index);
         Ok(format!("Unknown Group {}", index + 1))
     }
-}
-
-pub fn use_speakers(store: &Store, mut render_callback: impl FnMut() -> io::Result<()>) -> io::Result<()> {
-  let mut system = System::new()?;
-
-  Ok(for event in system.discover() {
-    match event {
-      SystemEvent::SpeakerFound(speaker) => {
-        store.dispatch(AppAction::SetStatusMessage(speaker.name().to_owned()));
-        render_callback()?;
-      },
-      SystemEvent::TopologyReady(sonos_topology) => {
-        debug!("TopologyReady event received");
-        
-        // Transform sonos topology to CLI topology structure with error handling
-        match transform_topology(&sonos_topology) {
-          Ok(cli_topology) => {
-            debug!("Topology transformation successful, dispatching SetTopology action");
-            
-            // Dispatch SetTopology action to update the store
-            store.dispatch(AppAction::SetTopology(cli_topology));
-            
-            // Update status message to indicate topology is ready
-            store.dispatch(AppAction::SetStatusMessage("Topology loaded".to_string()));
-          }
-          Err(err) => {
-            error!("Failed to transform topology: {}", err);
-            
-            // Update status message to indicate the error, but allow app to continue
-            store.dispatch(AppAction::SetStatusMessage(
-              format!("Topology error: {}", err)
-            ));
-            
-            // Don't return early - let the application continue functioning
-          }
-        }
-        
-        render_callback()?;
-      }
-      _ => {}
-    }
-  })
 }
 
 #[cfg(test)]

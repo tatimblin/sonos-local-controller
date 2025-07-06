@@ -16,7 +16,6 @@ impl ControlView {
   pub fn new(store: &Store) -> Self {
     let speaker_list = store.with_state(|state| {
       if let Some(topology) = &state.topology {
-        // Create speaker list from actual topology data
         let speakers: Vec<String> = topology.groups.iter()
           .flat_map(|group| group.speakers.iter().cloned())
           .collect();

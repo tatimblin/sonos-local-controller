@@ -94,16 +94,12 @@ impl System {
             match Speaker::from_location(&ssdp.location) {
               Ok(speaker) => {
                 info!("Successfully created speaker: {}", speaker.ip());
-                
-                // Extract UUID for HashMap key
+
                 let speaker_uuid = speaker.uuid().to_string();
-                
-                // Handle potential UUID conflicts or duplicates
                 if self.speakers.contains_key(&speaker_uuid) {
                   warn!("Duplicate speaker UUID found: {}. Replacing existing speaker.", speaker_uuid);
                 }
-                
-                // Store speaker in HashMap before emitting event
+
                 let boxed_speaker: Box<dyn SpeakerTrait> = Box::new(speaker.clone());
                 self.speakers.insert(speaker_uuid.clone(), boxed_speaker);
                 
@@ -121,17 +117,12 @@ impl System {
                     Ok(topology) => {
                       info!("Successfully retrieved topology with {} zone groups", topology.zone_group_count());
                       debug!("Topology details: {:?}", topology);
-                      
-                      // Store topology in the System's topology field
+
                       self.topology = Some(topology.clone());
-                      
-                      // Emit TopologyReady event when topology is successfully retrieved and stored
                       events.push(SystemEvent::TopologyReady(topology));
                     },
                     Err(e) => {
                       error!("Failed to retrieve topology: {:?}", e);
-                      
-                      // Emit Error event (not TopologyError) when topology retrieval fails
                       events.push(SystemEvent::Error(format!("Topology retrieval failed: {}", e)));
                     }
                   }

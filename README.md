@@ -153,48 +153,11 @@ pub enum SystemEvent {
 }
 ```
 
-### Key Changes from Previous Versions
-
-- **Breaking**: `discover()` now takes `&mut self` instead of consuming `self`
-- **Breaking**: `SystemEvent::Found` renamed to `SystemEvent::SpeakerFound`
-- **New**: `TopologyReady` and `DiscoveryComplete` events
-- **New**: State access methods (`speakers()`, `topology()`, etc.)
-- **New**: Speaker lookup by UUID (`get_speaker_by_uuid()`)
-
-## CLI Usage
-
-Run the CLI application:
-
-```bash
-cargo run --bin cli
-```
-
-The CLI provides an interactive interface for:
-- Discovering speakers
-- Viewing speaker groups
-- Controlling playback
-- Managing speaker settings
-
-## Documentation
-
-- [UI Integration Guide](sonos/docs/ui-integration.md) - Comprehensive guide for integrating with user interfaces
-- [API Reference](sonos/docs/api-reference.md) - Complete API documentation with examples
-- [Migration Guide](sonos/docs/api-reference.md#migration-guide) - Updating from previous versions
-
 ## Examples
 
 See the `examples/` directory for complete working examples:
 
 - `sonos-rs-demo.rs` - Basic discovery and control example
-
-## Architecture
-
-The library is structured around two main access patterns:
-
-1. **Nested Group Display**: Use topology information to show speakers in their group hierarchies
-2. **Flat Speaker Operations**: Direct access to individual speakers for control operations
-
-This dual approach allows for flexible UI designs while maintaining efficient speaker control.
 
 ## Development
 
@@ -216,14 +179,6 @@ cargo test
 cargo run --example sonos-rs-demo
 ```
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
@@ -232,4 +187,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - Built on top of the Sonos UPnP API
 - Uses SSDP for speaker discovery
-- Inspired by other Sonos control libraries

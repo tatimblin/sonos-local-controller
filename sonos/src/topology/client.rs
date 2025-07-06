@@ -13,19 +13,16 @@ use xmltree::Element;
 
 /// Client for retrieving topology information from Sonos speakers
 pub struct TopologyClient {
-    /// Underlying HTTP client for communication with Sonos devices
     client: Client,
 }
 
 impl TopologyClient {
-    /// Creates a new topology client with default settings
     pub fn new() -> Self {
         Self {
             client: Client::default(),
         }
     }
 
-    /// Creates a new topology client with a custom HTTP client
     pub fn with_client(client: Client) -> Self {
         Self { client }
     }
@@ -42,9 +39,6 @@ impl TopologyClient {
         info!("Starting topology retrieval from IP: {}", ip);
         
         let payload = "<InstanceID>0</InstanceID>";
-        debug!("Using payload: {}", payload);
-
-        info!("Sending GetZoneGroupState action to {}...", ip);
         let response = self.client.send_action(ip, Action::GetZoneGroupState, payload)
             .map_err(|e| {
                 error!("Failed to send action to {}: {:?}", ip, e);
@@ -133,10 +127,6 @@ mod tests {
         assert!(true);
     }
 
-    // Note: Testing actual network communication would require a mock server
-    // or integration tests with real Sonos devices. For unit tests, we focus
-    // on testing the structure and basic functionality.
-
     #[test]
     fn test_get_topology_from_ip_function_signature() {
         // This test verifies that the public function exists and has the correct signature
@@ -156,9 +146,6 @@ mod tests {
         // Should return an error (not panic) for invalid IP
         assert!(result.is_err());
     }
-
-    // Integration tests for actual network communication should be in a separate
-    // integration test file or marked with #[ignore] and run only when needed
     
     #[test]
     #[ignore] // Ignored by default as it requires network access

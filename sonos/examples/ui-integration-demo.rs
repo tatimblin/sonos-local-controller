@@ -1,9 +1,7 @@
 use sonos::{System, SystemEvent};
 use sonos::speaker::SpeakerTrait;
 
-/// Comprehensive example demonstrating UI integration patterns
-/// 
-/// This example shows:
+/// Execution flow:
 /// 1. Event-driven discovery with real-time updates
 /// 2. Nested group display using topology
 /// 3. Flat speaker operations for control

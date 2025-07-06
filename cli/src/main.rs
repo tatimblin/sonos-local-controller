@@ -39,8 +39,7 @@ impl App {
 
   fn update_current_view(&mut self) {
     let current_state_view = self.store.with_state(|state| state.view);
-    
-    // Check if we need to switch views based on state
+
     if current_state_view != self.current_view_type {
       match current_state_view {
         crate::types::View::Startup => {
@@ -58,7 +57,6 @@ impl App {
   }
 
   pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
-    // Run speaker discovery with a simple render callback
     use_speakers(&self.store, || {
       terminal
         .draw(|frame| self.current_view.render(frame))
@@ -66,7 +64,7 @@ impl App {
     })?;
 
     while !self.exit {
-      self.update_current_view(); // Reactive view updates
+      self.update_current_view();
       terminal.draw(|frame| self.current_view.render(frame))?;
 
       if let event::Event::Key(key_event) = event::read()? {
@@ -90,7 +88,6 @@ impl App {
 }
 
 fn main() -> io::Result<()> {
-  // Initialize logger to write to file in the root directory
   CombinedLogger::init(
     vec![
       WriteLogger::new(
