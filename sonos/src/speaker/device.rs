@@ -27,13 +27,13 @@ pub struct Device {
   pub model_url: String,
 
   #[serde(rename = "softwareVersion")]
-  pub software_version: String,
+  pub software_version: Option<String>,
 
   #[serde(rename = "hardwareVersion")]
-  pub hardware_version: String,
+  pub hardware_version: Option<String>,
 
   #[serde(rename = "swGen")]
-  pub sw_gen: String,
+  pub sw_gen: Option<String>,
 
   #[serde(rename = "serialNum")]
   pub serial_number: String,
@@ -75,7 +75,7 @@ pub struct Device {
   pub display_name: String,
 
   #[serde(rename = "zoneType")]
-  pub zone_type: u16,
+  pub zone_type: Option<u16>,
 
   #[serde(rename = "feature1")]
   pub feature_1: String,
@@ -87,28 +87,28 @@ pub struct Device {
   pub feature_3: String,
 
   #[serde(rename = "variant")]
-  pub variant: u16,
+  pub variant: Option<u16>,
 
   #[serde(rename = "internalSpeakerSize")]
-  pub internal_speaker_size: u16,
+  pub internal_speaker_size: Option<u16>,
 
   #[serde(rename = "memory")]
-  pub memory: u16,
+  pub memory: Option<u16>,
 
   #[serde(rename = "flash")]
-  pub flash: u16,
+  pub flash: Option<u16>,
 
   #[serde(rename = "ampOnTime")]
-  pub amp_on_time: u16,
+  pub amp_on_time: Option<u16>,
 
   #[serde(rename = "retailMode")]
-  pub retail_mode: bool,
+  pub retail_mode: Option<bool>,
 
   #[serde(rename = "SSLPort")]
-  pub ssl_port: u16,
+  pub ssl_port: Option<u16>,
 
   #[serde(rename = "securehhSSLPort")]
-  pub securehh_ssl_port: u16,
+  pub securehh_ssl_port: Option<u16>,
 
   #[serde(rename = "serviceList")]
   pub service_list: Option<Services>,

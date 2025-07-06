@@ -5,6 +5,7 @@ use ratatui::{
   Frame
 };
 
+#[derive(Clone)]
 pub struct SelectableList {
   title: String,
   items: Vec<String>,
@@ -14,7 +15,10 @@ pub struct SelectableList {
 impl SelectableList {
   pub fn new(title: &str, items: Vec<String>) -> Self {
     let mut state = ListState::default();
-    state.select(Some(0));
+    // Only select first item if list is not empty
+    if !items.is_empty() {
+      state.select(Some(0));
+    }
 
     Self {
       items,
@@ -38,6 +42,10 @@ impl SelectableList {
   }
 
   pub fn next(&mut self) {
+    if self.items.is_empty() {
+      return;
+    }
+    
     let i = self.state.selected().unwrap_or(0);
     let next = (i + 1) % self.items.len();
     self.state.select(None);
@@ -45,6 +53,10 @@ impl SelectableList {
   }
 
   pub fn previous(&mut self) {
+    if self.items.is_empty() {
+      return;
+    }
+    
     let i = match self.state.selected() {
       Some(i) => if i == 0 { self.items.len() - 1 } else { i - 1 },
       None => 0,
@@ -120,6 +132,20 @@ mod tests {
   fn test_empty_list() {
     let list = SelectableList::new("Empty List", vec![]);
     assert_eq!(list.items.len(), 0);
+    assert_eq!(list.selected(), None);
+  }
+
+  #[test]
+  fn test_empty_list_navigation() {
+    let mut list = SelectableList::new("Empty List", vec![]);
+    assert_eq!(list.selected(), None);
+    
+    // Navigation should not panic or change selection on empty list
+    list.next();
+    assert_eq!(list.selected(), None);
+    
+    list.previous();
+    assert_eq!(list.selected(), None);
   }
 
   #[test]
