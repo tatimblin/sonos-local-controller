@@ -37,7 +37,7 @@ pub fn app_reducer(state: &mut AppState, action: AppAction) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::View;
+    use crate::types::{View, Group};
 
     fn create_test_topology() -> Topology {
         Topology {

@@ -3,48 +3,48 @@ use crossterm::event::{ KeyCode, KeyEvent };
 use ratatui::Frame;
 
 use crate::state::store::Store;
-use crate::widgets::speaker_list::SpeakerList;
+use crate::widgets::topology_list::TopologyList;
 use crate::state::reducers::AppAction;
 
 use super::View;
 
 pub struct ControlView {
-  speaker_list: SpeakerList,
+  topology_list: TopologyList,
 }
 
 impl ControlView {
   pub fn new(store: &Store) -> Self {
-    let speaker_list = store.with_state(|state| {
+    let topology_list = store.with_state(|state| {
       if let Some(topology) = &state.topology {
-        let speakers: Vec<String> = topology.groups.iter()
-          .flat_map(|group| group.speakers.iter().cloned())
-          .collect();
-        SpeakerList::from_names(&speakers)
+        // Create topology list from actual topology data
+        TopologyList::new(topology)
       } else {
-        SpeakerList::from_names(&Vec::new())
+        // Create empty topology list for empty state
+        let empty_topology = crate::types::Topology { groups: vec![] };
+        TopologyList::new(&empty_topology)
       }
     });
 
-    Self { speaker_list }
+    Self { topology_list }
   }
 }
 
 impl View for ControlView {
   fn render(&mut self, frame: &mut Frame) {
-    self.speaker_list.draw(frame);
+    self.topology_list.draw(frame, frame.area());
   }
 
   fn handle_input(&mut self, key_event: KeyEvent, store: &Store) -> io::Result<()> {
       match key_event.code {
         KeyCode::Up => {
-          self.speaker_list.previous();
-          if let Some(index) = self.speaker_list.selected() {
+          self.topology_list.previous();
+          if let Some(index) = self.topology_list.selected() {
             store.dispatch(AppAction::SetSelectedSpeaker(index));
           }
         },
         KeyCode::Down => {
-          self.speaker_list.next();
-          if let Some(index) = self.speaker_list.selected() {
+          self.topology_list.next();
+          if let Some(index) = self.topology_list.selected() {
             store.dispatch(AppAction::SetSelectedSpeaker(index));
           }
         },
