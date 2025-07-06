@@ -20,7 +20,6 @@ pub enum SystemEvent {
   TopologyReady(Topology),
   DiscoveryComplete,
   Error(String),
-  GroupUpdate(String, Vec<String>),
 }
 
 impl System {
@@ -56,9 +55,31 @@ impl System {
     self.speakers.get(uuid)
   }
 
+  /// Gets a zone group by coordinator zone name
+  /// 
+  /// This method finds a zone group by looking for the coordinator member
+  /// whose zone_name matches the provided name.
+  /// 
+  /// # Arguments
+  /// * `name` - The zone name of the coordinator speaker
+  /// 
+  /// # Returns
+  /// * `Some(&ZoneGroup)` - If a zone group with matching coordinator zone name is found
+  /// * `None` - If no matching zone group is found or topology is not available
+  pub fn get_zone_group_by_name(&self, name: &str) -> Option<&crate::topology::types::ZoneGroup> {
+    self.topology.as_ref()?.zone_groups.iter()
+      .find(|group| {
+        // Find the coordinator member and match its zone_name
+        group.members.iter()
+          .find(|member| member.uuid == group.coordinator)
+          .map(|coordinator| coordinator.zone_name == name)
+          .unwrap_or(false)
+      })
+  }
+
   #[cfg(test)]
   /// Test helper method to add a speaker directly (bypassing discovery)
-  fn add_speaker_for_test(&mut self, speaker: Box<dyn SpeakerTrait>) {
+  pub fn add_speaker_for_test(&mut self, speaker: Box<dyn SpeakerTrait>) {
     let uuid = speaker.uuid().to_string();
     self.speakers.insert(uuid, speaker);
   }
@@ -444,9 +465,6 @@ mod tests {
           // DiscoveryComplete should be the last event
           let event_index = events.iter().position(|e| matches!(e, SystemEvent::DiscoveryComplete)).unwrap();
           assert_eq!(event_index, events.len() - 1, "DiscoveryComplete should be the last event");
-        },
-        SystemEvent::GroupUpdate(_, _) => {
-          // GroupUpdate events are not used in discovery but should be valid if present
         }
       }
     }
@@ -746,14 +764,12 @@ mod tests {
     
     let discovery_complete = SystemEvent::DiscoveryComplete;
     let error_event = SystemEvent::Error("Test error".to_string());
-    let group_update = SystemEvent::GroupUpdate("group_id".to_string(), vec!["speaker1".to_string()]);
     
     // Test that Debug formatting works for all events
     let speaker_debug = format!("{:?}", speaker_found);
     let topology_debug = format!("{:?}", topology_ready);
     let discovery_debug = format!("{:?}", discovery_complete);
     let error_debug = format!("{:?}", error_event);
-    let group_debug = format!("{:?}", group_update);
     
     // Verify debug strings are not empty and contain expected content
     assert!(speaker_debug.contains("SpeakerFound"));
@@ -761,8 +777,123 @@ mod tests {
     assert!(discovery_debug.contains("DiscoveryComplete"));
     assert!(error_debug.contains("Error"));
     assert!(error_debug.contains("Test error"));
-    assert!(group_debug.contains("GroupUpdate"));
-    assert!(group_debug.contains("group_id"));
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_get_zone_group_by_name() {
+    let mut system = System::new().unwrap();
+    
+    // Test with no topology
+    assert!(system.get_zone_group_by_name("Living Room").is_none());
+    
+    // Create test topology with zone groups
+    use crate::topology::types::{Topology, ZoneGroup, ZoneGroupMember};
+    let test_topology = Topology {
+      zone_groups: vec![
+        ZoneGroup {
+          coordinator: "RINCON_123".to_string(),
+          id: "RINCON_123:123".to_string(),
+          members: vec![
+            ZoneGroupMember {
+              uuid: "RINCON_123".to_string(),
+              location: "http://192.168.1.100:1400/xml/device_description.xml".to_string(),
+              zone_name: "Living Room".to_string(),
+              software_version: "56.0-76060".to_string(),
+              configuration: "1".to_string(),
+              icon: "x-rincon-roomicon:living".to_string(),
+              satellites: vec![],
+            }
+          ],
+        },
+        ZoneGroup {
+          coordinator: "RINCON_456".to_string(),
+          id: "RINCON_456:456".to_string(),
+          members: vec![
+            ZoneGroupMember {
+              uuid: "RINCON_456".to_string(),
+              location: "http://192.168.1.101:1400/xml/device_description.xml".to_string(),
+              zone_name: "Kitchen".to_string(),
+              software_version: "56.0-76060".to_string(),
+              configuration: "1".to_string(),
+              icon: "x-rincon-roomicon:kitchen".to_string(),
+              satellites: vec![],
+            }
+          ],
+        }
+      ],
+      vanished_devices: None,
+    };
+    
+    system.topology = Some(test_topology);
+    
+    // Test finding existing zone groups
+    let living_room_group = system.get_zone_group_by_name("Living Room");
+    assert!(living_room_group.is_some());
+    assert_eq!(living_room_group.unwrap().coordinator, "RINCON_123");
+    
+    let kitchen_group = system.get_zone_group_by_name("Kitchen");
+    assert!(kitchen_group.is_some());
+    assert_eq!(kitchen_group.unwrap().coordinator, "RINCON_456");
+    
+    // Test not finding non-existent zone group
+    assert!(system.get_zone_group_by_name("Bedroom").is_none());
+    
+    // Test case sensitivity
+    assert!(system.get_zone_group_by_name("living room").is_none());
+    assert!(system.get_zone_group_by_name("LIVING ROOM").is_none());
+    
+    // Test empty string
+    assert!(system.get_zone_group_by_name("").is_none());
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_get_zone_group_by_name_with_grouped_zones() {
+    let mut system = System::new().unwrap();
+    
+    // Create topology with a grouped zone (multiple members, same coordinator)
+    use crate::topology::types::{Topology, ZoneGroup, ZoneGroupMember};
+    let test_topology = Topology {
+      zone_groups: vec![
+        ZoneGroup {
+          coordinator: "RINCON_123".to_string(),
+          id: "RINCON_123:123".to_string(),
+          members: vec![
+            ZoneGroupMember {
+              uuid: "RINCON_123".to_string(),
+              location: "http://192.168.1.100:1400/xml/device_description.xml".to_string(),
+              zone_name: "Living Room".to_string(),
+              software_version: "56.0-76060".to_string(),
+              configuration: "1".to_string(),
+              icon: "x-rincon-roomicon:living".to_string(),
+              satellites: vec![],
+            },
+            ZoneGroupMember {
+              uuid: "RINCON_456".to_string(),
+              location: "http://192.168.1.101:1400/xml/device_description.xml".to_string(),
+              zone_name: "Kitchen".to_string(),
+              software_version: "56.0-76060".to_string(),
+              configuration: "1".to_string(),
+              icon: "x-rincon-roomicon:kitchen".to_string(),
+              satellites: vec![],
+            }
+          ],
+        }
+      ],
+      vanished_devices: None,
+    };
+    
+    system.topology = Some(test_topology);
+    
+    // Should find the group by coordinator's zone name
+    let group = system.get_zone_group_by_name("Living Room");
+    assert!(group.is_some());
+    assert_eq!(group.unwrap().coordinator, "RINCON_123");
+    assert_eq!(group.unwrap().members.len(), 2);
+    
+    // Should not find by non-coordinator member's zone name
+    assert!(system.get_zone_group_by_name("Kitchen").is_none());
   }
 
   #[test]

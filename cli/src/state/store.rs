@@ -1,5 +1,6 @@
 use std::sync::{ Arc, Mutex };
 use crate::types::*;
+use sonos::System;
 
 use super::reducers::{ AppAction, app_reducer };
 
@@ -7,6 +8,9 @@ pub struct AppState {
   pub view: View,
   pub status_message: String,
   pub topology: Option<Topology>,
+  pub system: Option<Arc<System>>,
+  pub selected_speaker_uuid: Option<String>,
+  pub selected_group_uuid: Option<String>,
 }
 
 impl Default for AppState {
@@ -15,6 +19,9 @@ impl Default for AppState {
       view: View::Startup,
       status_message: "loading...".to_owned(),
       topology: None,
+      system: None,
+      selected_speaker_uuid: None,
+      selected_group_uuid: None,
     }
   }
 }

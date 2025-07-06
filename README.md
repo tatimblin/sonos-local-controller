@@ -149,7 +149,6 @@ pub enum SystemEvent {
     TopologyReady(Topology),         // Complete topology available
     Error(String),                   // General errors
     DiscoveryComplete,               // Discovery process finished
-    GroupUpdate(String, Vec<String>), // Group membership changes
 }
 ```
 

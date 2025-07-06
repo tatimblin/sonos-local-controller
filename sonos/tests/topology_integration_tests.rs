@@ -333,9 +333,6 @@ mod system_integration_tests {
                 SystemEvent::Error(_) => {
                     // Error events should be generic, not topology-specific
                 },
-                SystemEvent::GroupUpdate(_, _) => {
-                    // Group update events (not used in discovery but valid)
-                },
                 // Note: No SystemEvent::Found variant should exist anymore
             }
         }
@@ -613,9 +610,6 @@ mod system_integration_tests {
                 SystemEvent::DiscoveryComplete => {
                     assert!(discovery_complete_index.is_none(), "Should have only one DiscoveryComplete event");
                     discovery_complete_index = Some(i);
-                },
-                SystemEvent::GroupUpdate(_, _) => {
-                    // Group updates are valid but not expected during discovery
                 }
             }
         }
