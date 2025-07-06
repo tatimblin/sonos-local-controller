@@ -65,88 +65,114 @@ impl System {
 
   pub fn discover(&mut self) -> impl Iterator<Item = SystemEvent> + '_ {
     info!("Starting discovery process...");
-    
-    // Clear existing speakers and topology at start of discovery
-    self.speakers.clear();
-    self.topology = None;
+    self.clear_state();
 
-    let socket = UdpSocket::bind("0.0.0.0:0")
-      .expect("Failed to create socket");
-
-    let responses = send_ssdp_request(
-      socket,
-      "239.255.255.250:1900",
-      "urn:schemas-upnp-org:device:ZonePlayer:1"
-    )
-      .expect("Failed to send SSDP request");
-
-    info!("SSDP request sent, waiting for responses...");
+    let responses = match self.setup_discovery() {
+      Ok(responses) => responses,
+      Err(e) => {
+        error!("Failed to setup discovery: {}", e);
+        return Box::new(std::iter::once(SystemEvent::Error(e.to_string()))
+          .chain(std::iter::once(SystemEvent::DiscoveryComplete))) as Box<dyn Iterator<Item = SystemEvent>>;
+      }
+    };
 
     let mut is_first_speaker = true;
 
-    responses
+    Box::new(responses
       .filter(|response| response.is_ok())
       .flat_map(move |response| {
-        match response {
-          Ok(ssdp) => {
-            info!("Processing SSDP response from location: {}", ssdp.location);
-            
-            match Speaker::from_location(&ssdp.location) {
-              Ok(speaker) => {
-                info!("Successfully created speaker: {}", speaker.ip());
-
-                let speaker_uuid = speaker.uuid().to_string();
-                if self.speakers.contains_key(&speaker_uuid) {
-                  warn!("Duplicate speaker UUID found: {}. Replacing existing speaker.", speaker_uuid);
-                }
-
-                let boxed_speaker: Box<dyn SpeakerTrait> = Box::new(speaker.clone());
-                self.speakers.insert(speaker_uuid.clone(), boxed_speaker);
-                
-                info!("Stored speaker with UUID: {}", speaker_uuid);
-                
-                // Get speaker IP before moving speaker into event
-                let speaker_ip = speaker.ip().to_string();
-                let mut events = vec![SystemEvent::SpeakerFound(speaker)];
-                
-                if is_first_speaker {
-                  is_first_speaker = false;
-                  info!("This is the first speaker, attempting to get topology...");
-                  
-                  match Topology::from_ip(&speaker_ip) {
-                    Ok(topology) => {
-                      info!("Successfully retrieved topology with {} zone groups", topology.zone_group_count());
-                      debug!("Topology details: {:?}", topology);
-
-                      self.topology = Some(topology.clone());
-                      events.push(SystemEvent::TopologyReady(topology));
-                    },
-                    Err(e) => {
-                      error!("Failed to retrieve topology: {:?}", e);
-                      events.push(SystemEvent::Error(format!("Topology retrieval failed: {}", e)));
-                    }
-                  }
-                }
-
-                events
-              },
-              Err(e) => {
-                error!("Failed to create speaker from location {}: {}", ssdp.location, e);
-                vec![SystemEvent::Error(e.to_string())]
-              }
-            }
-          },
-          Err(e) => {
-            error!("Error in SSDP response: {}", e);
-            vec![SystemEvent::Error(e.to_string())]
-          },
-        }
+        self.process_ssdp_response(response, &mut is_first_speaker)
       })
       .chain(std::iter::once_with(|| {
         info!("Discovery process completed");
         SystemEvent::DiscoveryComplete
-      }))
+      }))) as Box<dyn Iterator<Item = SystemEvent>>
+  }
 
+  fn clear_state(&mut self) {
+    self.speakers.clear();
+    self.topology = None;
+  }
+
+  fn setup_discovery(&self) -> Result<impl Iterator<Item = std::result::Result<crate::util::ssdp::SsdpResponse, std::io::Error>>> {
+    let socket = UdpSocket::bind("0.0.0.0:0")?;
+    
+    let responses = send_ssdp_request(
+      socket,
+      "239.255.255.250:1900",
+      "urn:schemas-upnp-org:device:ZonePlayer:1"
+    )?;
+
+    info!("SSDP request sent, waiting for responses...");
+    Ok(responses)
+  }
+
+  fn process_ssdp_response(
+    &mut self, 
+    response: std::result::Result<crate::util::ssdp::SsdpResponse, std::io::Error>,
+    is_first_speaker: &mut bool
+  ) -> Vec<SystemEvent> {
+    match response {
+      Ok(ssdp) => {
+        info!("Processing SSDP response from location: {}", ssdp.location);
+        self.process_speaker_discovery(&ssdp.location, is_first_speaker)
+      },
+      Err(e) => {
+        error!("Error in SSDP response: {}", e);
+        vec![SystemEvent::Error(e.to_string())]
+      },
+    }
+  }
+
+  fn process_speaker_discovery(&mut self, location: &str, is_first_speaker: &mut bool) -> Vec<SystemEvent> {
+    match Speaker::from_location(location) {
+      Ok(speaker) => {
+        info!("Successfully created speaker: {}", speaker.ip());
+        self.store_speaker(&speaker, is_first_speaker)
+      },
+      Err(e) => {
+        error!("Failed to create speaker from location {}: {}", location, e);
+        vec![SystemEvent::Error(e.to_string())]
+      }
+    }
+  }
+
+  fn store_speaker(&mut self, speaker: &Speaker, is_first_speaker: &mut bool) -> Vec<SystemEvent> {
+    let speaker_uuid = speaker.uuid().to_string();
+    if self.speakers.contains_key(&speaker_uuid) {
+      warn!("Duplicate speaker UUID found: {}. Replacing existing speaker.", speaker_uuid);
+    }
+
+    let boxed_speaker: Box<dyn SpeakerTrait> = Box::new(speaker.clone());
+    self.speakers.insert(speaker_uuid.clone(), boxed_speaker);
+    info!("Stored speaker with UUID: {}", speaker_uuid);
+
+    let mut events = vec![SystemEvent::SpeakerFound(speaker.clone())];
+    
+    if *is_first_speaker {
+      *is_first_speaker = false;
+      events.extend(self.attempt_topology_retrieval(speaker.ip()));
+    }
+
+    events
+  }
+
+  fn attempt_topology_retrieval(&mut self, speaker_ip: &str) -> Vec<SystemEvent> {
+    info!("This is the first speaker, attempting to get topology...");
+    
+    match Topology::from_ip(speaker_ip) {
+      Ok(topology) => {
+        info!("Successfully retrieved topology with {} zone groups", topology.zone_group_count());
+        debug!("Topology details: {:?}", topology);
+
+        self.topology = Some(topology.clone());
+        vec![SystemEvent::TopologyReady(topology)]
+      },
+      Err(e) => {
+        error!("Failed to retrieve topology: {:?}", e);
+        vec![SystemEvent::Error(format!("Topology retrieval failed: {}", e))]
+      }
+    }
   }
 }
 
