@@ -1,6 +1,6 @@
 use serde_derive::Deserialize;
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default)]
 pub struct Device {
   #[serde(rename = "deviceType")]
   pub device_type: String,
@@ -117,13 +117,13 @@ pub struct Device {
   pub device_list: Option<SubDevices>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Icons {
   #[serde(rename = "icon")]
   pub icon: Vec<Icon>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Icon {
   #[serde(rename = "id")]
   pub id: Option<String>,
@@ -144,13 +144,13 @@ pub struct Icon {
   pub url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Services {
   #[serde(rename = "service")]
   pub service: Vec<Service>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Service {
   #[serde(rename = "serviceType")]
   pub service_type: String,
@@ -168,13 +168,13 @@ pub struct Service {
   pub scdpurl: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct SubDevices {
   #[serde(rename = "device")]
   pub device: Vec<SubDevice>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct SubDevice {
   #[serde(rename = "deviceType")]
   pub device_type: String,

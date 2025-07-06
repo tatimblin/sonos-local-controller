@@ -11,28 +11,30 @@ use ratatui::{
 use crate::state::store::Store;
 use crate::widgets::{ logo::logo, util };
 
-use super::View;
+use super::ViewTrait;
 
-pub struct StartupView {
+pub struct ErrorView {
   store: Arc<Store>,
 }
 
-impl StartupView {
+impl ErrorView {
   pub fn new(store: Arc<Store>) -> Self {
     Self { store }
   }
 
-  fn get_status_message(&self) -> String {
+  fn get_error(&self) -> String {
     self.store.with_state(|state| {
-      state.status_message.clone()
+      state.error.clone()
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "Unknown error".to_string())
     })
   }
 }
 
-impl View for StartupView {
+impl ViewTrait for ErrorView {
   fn render(&mut self, frame: &mut Frame) {
     let logo = logo();
-    let body = Text::from(self.get_status_message());
+    let body = Text::from(self.get_error());
 
     let inner_layout = Layout::default()
       .direction(Direction::Vertical)

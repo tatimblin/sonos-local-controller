@@ -8,6 +8,7 @@ pub struct ServiceInfo {
 pub enum Service {
   AVTransport(ServiceInfo),
   RenderingControl(ServiceInfo),
+  ZoneGroupTopology(ServiceInfo),
 }
 
 impl Service {
@@ -25,12 +26,20 @@ impl Service {
     })
   }
 
+  pub fn zone_group_topology() -> Self {
+    Service::ZoneGroupTopology(ServiceInfo {
+      endpoint: "ZoneGroupTopology/Control",
+      service: "urn:schemas-upnp-org:service:ZoneGroupTopology:1",
+    })
+  }
+
   pub fn get_info(&self) -> &ServiceInfo {
     match self {
       Service::AVTransport(info) => info,
       Service::RenderingControl(info) => info,
+      Service::ZoneGroupTopology(info) => info,
     }
-  } 
+  }
 }
 
 #[derive(Debug)]
@@ -40,6 +49,7 @@ pub enum Action {
   GetVolume,
   SetVolume,
   SetRelativeVolume,
+  GetZoneGroupState,
 }
 
 impl Action {
@@ -58,6 +68,7 @@ impl Action {
       Action::GetVolume => "GetVolume",
       Action::SetVolume => "SetVolume",
       Action::SetRelativeVolume => "SetRelativeVolume",
+      Action::GetZoneGroupState => "GetZoneGroupState",
     }
   }
 
@@ -70,6 +81,8 @@ impl Action {
       | Action::SetVolume
       | Action::SetRelativeVolume
       => Service::rendering_control(),
+      Action::GetZoneGroupState
+      => Service::zone_group_topology(),
     }
   }
 }

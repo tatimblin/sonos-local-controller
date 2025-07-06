@@ -4,7 +4,7 @@ use ratatui::Frame;
 
 use crate::state::store::Store;
 use crate::widgets::speaker_list::SpeakerList;
-use crate::types::AppAction;
+use crate::state::reducers::AppAction;
 
 use super::View;
 
@@ -15,7 +15,14 @@ pub struct ControlView {
 impl ControlView {
   pub fn new(store: &Store) -> Self {
     let speaker_list = store.with_state(|state| {
-      SpeakerList::new(&state.speakers)
+      if let Some(topology) = &state.topology {
+        let speakers: Vec<String> = topology.groups.iter()
+          .flat_map(|group| group.speakers.iter().cloned())
+          .collect();
+        SpeakerList::from_names(&speakers)
+      } else {
+        SpeakerList::from_names(&Vec::new())
+      }
     });
 
     Self { speaker_list }

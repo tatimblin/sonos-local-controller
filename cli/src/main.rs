@@ -8,6 +8,8 @@ use std::io;
 use std::sync::Arc;
 use crossterm::event::{ self, KeyCode, KeyEvent };
 use ratatui::DefaultTerminal;
+use simplelog::*;
+use std::fs::File;
 
 use crate::state::store::Store;
 use crate::hooks::use_speakers::use_speakers;
@@ -21,6 +23,7 @@ pub struct App {
   store: Arc<Store>,
   exit: bool,
   current_view: Box<dyn View>,
+  current_view_type: crate::types::View,
 }
 
 impl App {
@@ -29,7 +32,27 @@ impl App {
     Self {
       store: store.clone(),
       current_view: Box::new(StartupView::new(store.clone())),
+      current_view_type: crate::types::View::Startup,
       exit: false,
+    }
+  }
+
+  fn update_current_view(&mut self) {
+    let current_state_view = self.store.with_state(|state| state.view);
+
+    if current_state_view != self.current_view_type {
+      match current_state_view {
+        crate::types::View::Startup => {
+          log::debug!("Switching to startup view");
+          self.current_view = Box::new(StartupView::new(self.store.clone()));
+          self.current_view_type = crate::types::View::Startup;
+        }
+        crate::types::View::Control => {
+          log::debug!("Switching to control view");
+          self.current_view = Box::new(ControlView::new(&self.store));
+          self.current_view_type = crate::types::View::Control;
+        }
+      }
     }
   }
 
@@ -40,9 +63,8 @@ impl App {
         .map(|_| ())
     })?;
 
-    self.current_view = Box::new(ControlView::new(&self.store));
-
     while !self.exit {
+      self.update_current_view();
       terminal.draw(|frame| self.current_view.render(frame))?;
 
       if let event::Event::Key(key_event) = event::read()? {
@@ -66,6 +88,16 @@ impl App {
 }
 
 fn main() -> io::Result<()> {
+  CombinedLogger::init(
+    vec![
+      WriteLogger::new(
+        LevelFilter::Debug,
+        Config::default(),
+        File::create("../sonos_debug.log").unwrap(),
+      ),
+    ]
+  ).unwrap();
+
   let mut terminal = ratatui::init();
   let app_result = App::new().run(&mut terminal);
   ratatui::restore();

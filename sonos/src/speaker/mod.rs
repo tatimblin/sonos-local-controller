@@ -1,10 +1,10 @@
 mod speaker;
-mod speaker_info;
-mod device;
-mod model;
-mod client;
-mod api;
-
 pub use speaker::Speaker;
-pub use speaker_info::SpeakerInfo;
+pub use speaker::SpeakerFactory;
+pub use speaker::SpeakerTrait;
+
+mod device;
 pub use device::Device;
+
+#[cfg(feature = "mock")]
+pub mod mock;
