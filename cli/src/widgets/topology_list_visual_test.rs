@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod visual_tests {
     use super::super::topology_list::TopologyList;
-    use crate::types::{Topology, Group, SonosTopology, ZoneGroup, ZoneGroupMember, Satellite};
+    use crate::types::{Topology, Group, SpeakerInfo, SonosTopology, ZoneGroup, ZoneGroupMember, Satellite};
 
     #[test]
     #[ignore] // Use `cargo test -- --ignored` to run this test
@@ -17,11 +17,14 @@ mod visual_tests {
             groups: vec![
                 Group {
                     name: "Living Room".to_string(),
-                    speakers: vec!["Living Room".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Living Room", true)],
                 },
                 Group {
                     name: "Kitchen".to_string(),
-                    speakers: vec!["Kitchen".to_string(), "Dining Room".to_string()],
+                    speakers: vec![
+                        SpeakerInfo::from_name("Kitchen", true),
+                        SpeakerInfo::from_name("Dining Room", false),
+                    ],
                 },
             ],
         };

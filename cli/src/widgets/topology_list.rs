@@ -1,4 +1,4 @@
-use crate::types::{Topology, Group, SonosTopology, ZoneGroup};
+use crate::types::{Topology, Group, SpeakerInfo, SonosTopology, ZoneGroup};
 use super::selectable_list::SelectableList;
 use ratatui::{layout::Rect, Frame};
 
@@ -58,26 +58,25 @@ impl TopologyFlattener {
             let mut speakers = group.speakers.clone();
             speakers.sort_by(|a, b| {
                 // Coordinator comes first
-                if a == &coordinator_name {
+                if a.is_coordinator {
                     std::cmp::Ordering::Less
-                } else if b == &coordinator_name {
+                } else if b.is_coordinator {
                     std::cmp::Ordering::Greater
                 } else {
                     // Non-coordinators sorted alphabetically
-                    a.cmp(b)
+                    a.name.cmp(&b.name)
                 }
             });
 
-            for speaker_name in &speakers {
+            for speaker in &speakers {
                 // Handle empty speaker names
-                let safe_speaker_name = if speaker_name.trim().is_empty() {
+                let safe_speaker_name = if speaker.name.trim().is_empty() {
                     "Unknown Speaker".to_string()
                 } else {
-                    speaker_name.clone()
+                    speaker.name.clone()
                 };
 
-                let is_coordinator = speaker_name == &coordinator_name;
-                let speaker_item = HierarchicalItem::from_speaker(&safe_speaker_name, &group_name, is_coordinator);
+                let speaker_item = HierarchicalItem::from_speaker(&safe_speaker_name, &group_name, speaker.is_coordinator);
                 let speaker_display = Self::format_speaker(&safe_speaker_name, 1);
                 items.push(speaker_item);
                 display_strings.push(speaker_display);
@@ -255,15 +254,15 @@ impl TopologyFlattener {
     /// Helper method to find coordinator speaker or provide fallback
     /// Handles cases where the coordinator speaker is missing or invalid
     fn find_coordinator_or_fallback(group: &Group) -> String {
-        // First try to find the coordinator by matching group name
-        if group.speakers.iter().any(|s| s == &group.name) {
-            return group.name.clone();
+        // First try to find the coordinator speaker
+        if let Some(coordinator) = group.speakers.iter().find(|s| s.is_coordinator) {
+            return coordinator.name.clone();
         }
 
-        // If no exact match, try case-insensitive match
+        // If no coordinator found, try to match by group name
         for speaker in &group.speakers {
-            if speaker.to_lowercase() == group.name.to_lowercase() {
-                return speaker.clone();
+            if speaker.name.to_lowercase() == group.name.to_lowercase() {
+                return speaker.name.clone();
             }
         }
 
@@ -271,8 +270,8 @@ impl TopologyFlattener {
         if let Some(first_speaker) = group.speakers.first() {
             #[cfg(debug_assertions)]
             eprintln!("Warning: Coordinator '{}' not found in speakers, using '{}' as fallback", 
-                group.name, first_speaker);
-            return first_speaker.clone();
+                group.name, first_speaker.name);
+            return first_speaker.name.clone();
         }
 
         // Final fallback to group name (should not happen due to earlier validation)
@@ -575,12 +574,19 @@ impl TopologyList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Topology, Group, SonosTopology, ZoneGroup, ZoneGroupMember, Satellite};
+    use crate::types::{Topology, Group, SpeakerInfo, SonosTopology, ZoneGroup, ZoneGroupMember, Satellite};
 
     fn create_test_group() -> Group {
         Group {
             name: "Living Room".to_string(),
-            speakers: vec!["Living Room".to_string()],
+            speakers: vec![
+                SpeakerInfo {
+                    name: "Living Room".to_string(),
+                    uuid: "RINCON_000E58C0123456789".to_string(),
+                    ip: "192.168.1.100".to_string(),
+                    is_coordinator: true,
+                }
+            ],
         }
     }
 
@@ -595,11 +601,14 @@ mod tests {
             groups: vec![
                 Group {
                     name: "Living Room".to_string(),
-                    speakers: vec!["Living Room".to_string(), "Kitchen".to_string()],
+                    speakers: vec![
+                        SpeakerInfo::from_name("Living Room", true),
+                        SpeakerInfo::from_name("Kitchen", false),
+                    ],
                 },
                 Group {
                     name: "Bedroom".to_string(),
-                    speakers: vec!["Bedroom".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Bedroom", true)],
                 },
             ],
         }
@@ -761,7 +770,7 @@ mod tests {
             groups: vec![
                 Group {
                     name: "Valid Group".to_string(),
-                    speakers: vec!["Speaker 1".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Speaker 1", true)],
                 },
                 Group {
                     name: "Empty Group".to_string(),
@@ -951,7 +960,7 @@ mod tests {
         let topology = Topology {
             groups: vec![Group {
                 name: "Bedroom".to_string(),
-                speakers: vec!["Bedroom".to_string()],
+                speakers: vec![SpeakerInfo::from_name("Bedroom", true)],
             }],
         };
         
@@ -974,7 +983,7 @@ mod tests {
         let topology = Topology {
             groups: vec![Group {
                 name: "".to_string(), // Empty name
-                speakers: vec!["Speaker 1".to_string()],
+                speakers: vec![SpeakerInfo::from_name("Speaker 1", true)],
             }],
         };
         
@@ -996,7 +1005,7 @@ mod tests {
         let topology = Topology {
             groups: vec![Group {
                 name: "Living Room".to_string(),
-                speakers: vec!["".to_string()], // Empty speaker name
+                speakers: vec![SpeakerInfo::from_name("", true)], // Empty speaker name
             }],
         };
         
@@ -1491,15 +1500,22 @@ mod tests {
             groups: vec![
                 Group {
                     name: "Living Room".to_string(),
-                    speakers: vec!["Living Room".to_string(), "Kitchen".to_string(), "Dining Room".to_string()],
+                    speakers: vec![
+                        SpeakerInfo::from_name("Living Room", true),
+                        SpeakerInfo::from_name("Kitchen", false),
+                        SpeakerInfo::from_name("Dining Room", false),
+                    ],
                 },
                 Group {
                     name: "Bedroom".to_string(),
-                    speakers: vec!["Bedroom".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Bedroom", true)],
                 },
                 Group {
                     name: "Office".to_string(),
-                    speakers: vec!["Office".to_string(), "Study".to_string()],
+                    speakers: vec![
+                        SpeakerInfo::from_name("Office", true),
+                        SpeakerInfo::from_name("Study", false),
+                    ],
                 },
             ],
         };
@@ -1565,11 +1581,14 @@ mod tests {
             groups: vec![
                 Group {
                     name: "".to_string(), // Empty group name
-                    speakers: vec!["Valid Speaker".to_string(), "".to_string()], // One empty speaker name
+                    speakers: vec![
+                        SpeakerInfo::from_name("Valid Speaker", true),
+                        SpeakerInfo::from_name("", false),
+                    ], // One empty speaker name
                 },
                 Group {
                     name: "   ".to_string(), // Whitespace-only group name
-                    speakers: vec!["Another Speaker".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Another Speaker", true)],
                 },
             ],
         };
@@ -1603,7 +1622,10 @@ mod tests {
             groups: vec![
                 Group {
                     name: "Missing Coordinator".to_string(),
-                    speakers: vec!["Speaker A".to_string(), "Speaker B".to_string()],
+                    speakers: vec![
+                        SpeakerInfo::from_name("Speaker A", true),
+                        SpeakerInfo::from_name("Speaker B", false),
+                    ],
                 },
             ],
         };
@@ -1783,14 +1805,17 @@ mod tests {
         // Test singular vs plural speaker text
         let single_group = Group {
             name: "Living Room".to_string(),
-            speakers: vec!["Living Room".to_string()],
+            speakers: vec![SpeakerInfo::from_name("Living Room", true)],
         };
         let single_display = TopologyFlattener::format_group(&single_group);
         assert_eq!(single_display, "Group: Living Room (1 speaker)");
 
         let multi_group = Group {
             name: "Living Room".to_string(),
-            speakers: vec!["Living Room".to_string(), "Kitchen".to_string()],
+            speakers: vec![
+                        SpeakerInfo::from_name("Living Room", true),
+                        SpeakerInfo::from_name("Kitchen", false),
+                    ],
         };
         let multi_display = TopologyFlattener::format_group(&multi_group);
         assert_eq!(multi_display, "Group: Living Room (2 speakers)");
@@ -1806,7 +1831,7 @@ mod topology_list_tests {
     fn create_test_group() -> Group {
         Group {
             name: "Living Room".to_string(),
-            speakers: vec!["Living Room".to_string()],
+            speakers: vec![SpeakerInfo::from_name("Living Room", true)],
         }
     }
 
@@ -1821,11 +1846,14 @@ mod topology_list_tests {
             groups: vec![
                 Group {
                     name: "Living Room".to_string(),
-                    speakers: vec!["Living Room".to_string(), "Kitchen".to_string()],
+                    speakers: vec![
+                        SpeakerInfo::from_name("Living Room", true),
+                        SpeakerInfo::from_name("Kitchen", false),
+                    ],
                 },
                 Group {
                     name: "Bedroom".to_string(),
-                    speakers: vec!["Bedroom".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Bedroom", true)],
                 },
             ],
         }
@@ -1959,7 +1987,10 @@ mod topology_list_tests {
             groups: vec![
                 Group {
                     name: "".to_string(), // Empty name
-                    speakers: vec!["Valid Speaker".to_string(), "".to_string()], // Mixed valid/invalid
+                    speakers: vec![
+                        SpeakerInfo::from_name("Valid Speaker", true),
+                        SpeakerInfo::from_name("", false),
+                    ], // Mixed valid/invalid
                 },
                 Group {
                     name: "Valid Group".to_string(),
@@ -1967,7 +1998,7 @@ mod topology_list_tests {
                 },
                 Group {
                     name: "Another Group".to_string(),
-                    speakers: vec!["Speaker A".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Speaker A", true)],
                 },
             ],
         };
@@ -2001,7 +2032,10 @@ mod topology_list_tests {
             groups: vec![
                 Group {
                     name: "Nonexistent Coordinator".to_string(),
-                    speakers: vec!["Speaker 1".to_string(), "Speaker 2".to_string()],
+                    speakers: vec![
+                        SpeakerInfo::from_name("Speaker 1", true),
+                        SpeakerInfo::from_name("Speaker 2", false),
+                    ],
                 },
             ],
         };
@@ -2077,11 +2111,14 @@ mod topology_list_tests {
             groups: vec![
                 Group {
                     name: "".to_string(), // Empty name - gets placeholder
-                    speakers: vec!["Speaker 1".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Speaker 1", true)],
                 },
                 Group {
                     name: "Normal Group".to_string(),
-                    speakers: vec!["Speaker 2".to_string(), "Speaker 3".to_string()],
+                    speakers: vec![
+                        SpeakerInfo::from_name("Speaker 2", true),
+                        SpeakerInfo::from_name("Speaker 3", false),
+                    ],
                 },
             ],
         };

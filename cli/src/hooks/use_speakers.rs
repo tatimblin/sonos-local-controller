@@ -108,8 +108,8 @@ fn transform_zone_group(zone_group: &sonos::topology::ZoneGroup, index: usize) -
         }
     };
     
-    // Collect all speaker names from zone group members
-    let speaker_names: Vec<String> = zone_group.members.iter()
+    // Collect all speaker info from zone group members
+    let speakers: Vec<crate::types::SpeakerInfo> = zone_group.members.iter()
         .enumerate()
         .filter_map(|(member_index, member)| {
             if member.zone_name.is_empty() {
@@ -117,14 +117,28 @@ fn transform_zone_group(zone_group: &sonos::topology::ZoneGroup, index: usize) -
                       member_index, index);
                 None
             } else {
-                Some(member.zone_name.clone())
+                // Extract IP from location URL
+                let ip = member.location
+                    .strip_prefix("http://")
+                    .and_then(|s| s.split(':').next())
+                    .unwrap_or("192.168.1.100") // Default fallback IP
+                    .to_string();
+                
+                let is_coordinator = member.uuid == zone_group.coordinator;
+                
+                Some(crate::types::SpeakerInfo {
+                    name: member.zone_name.clone(),
+                    uuid: member.uuid.clone(),
+                    ip,
+                    is_coordinator,
+                })
             }
         })
         .collect();
     
     Ok(Group {
         name: coordinator_name,
-        speakers: speaker_names,
+        speakers,
     })
 }
 

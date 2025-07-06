@@ -4,8 +4,13 @@
 //! satellite speakers in home theater setups, and performance with large structures.
 
 use super::topology_list::{TopologyList, HierarchicalItem, ItemType};
-use crate::types::{Topology, Group, SonosTopology, ZoneGroup, ZoneGroupMember, Satellite};
+use crate::types::{Topology, Group, SpeakerInfo, SonosTopology, ZoneGroup, ZoneGroupMember, Satellite};
 use std::time::Instant;
+
+/// Helper function to create a SpeakerInfo from a name
+fn create_speaker_info(name: &str, is_coordinator: bool) -> SpeakerInfo {
+    SpeakerInfo::from_name(name, is_coordinator)
+}
 
 /// Creates a complex multi-group topology with various configurations
 /// This simulates a real Sonos system with multiple rooms and groupings
@@ -15,27 +20,30 @@ fn create_complex_multi_group_topology() -> Topology {
             // Single speaker group
             Group {
                 name: "Bedroom".to_string(),
-                speakers: vec!["Bedroom".to_string()],
+                speakers: vec![create_speaker_info("Bedroom", true)],
             },
             // Multi-speaker group (Living Room + Kitchen)
             Group {
                 name: "Living Room".to_string(),
-                speakers: vec!["Living Room".to_string(), "Kitchen".to_string()],
+                speakers: vec![
+                    create_speaker_info("Living Room", true),
+                    create_speaker_info("Kitchen", false),
+                ],
             },
             // Another single speaker
             Group {
                 name: "Bathroom".to_string(),
-                speakers: vec!["Bathroom".to_string()],
+                speakers: vec![create_speaker_info("Bathroom", true)],
             },
             // Large group with many speakers
             Group {
                 name: "Whole House".to_string(),
                 speakers: vec![
-                    "Whole House".to_string(),
-                    "Dining Room".to_string(),
-                    "Office".to_string(),
-                    "Guest Room".to_string(),
-                    "Patio".to_string(),
+                    create_speaker_info("Whole House", true),
+                    create_speaker_info("Dining Room", false),
+                    create_speaker_info("Office", false),
+                    create_speaker_info("Guest Room", false),
+                    create_speaker_info("Patio", false),
                 ],
             },
         ],
@@ -143,17 +151,17 @@ fn create_large_topology() -> Topology {
     // Create 50 groups with varying sizes
     for i in 1..=50 {
         let group_name = format!("Zone {}", i);
-        let mut speakers = vec![group_name.clone()];
+        let mut speakers = vec![create_speaker_info(&group_name, true)];
         
         // Some groups have multiple speakers
         if i % 3 == 0 {
-            speakers.push(format!("Zone {} Secondary", i));
+            speakers.push(create_speaker_info(&format!("Zone {} Secondary", i), false));
         }
         if i % 5 == 0 {
-            speakers.push(format!("Zone {} Tertiary", i));
+            speakers.push(create_speaker_info(&format!("Zone {} Tertiary", i), false));
         }
         if i % 7 == 0 {
-            speakers.push(format!("Zone {} Quaternary", i));
+            speakers.push(create_speaker_info(&format!("Zone {} Quaternary", i), false));
         }
         
         groups.push(Group {
@@ -172,29 +180,36 @@ fn create_mixed_grouped_ungrouped_topology() -> Topology {
             // Ungrouped speakers (single speaker groups)
             Group {
                 name: "Bedroom".to_string(),
-                speakers: vec!["Bedroom".to_string()],
+                speakers: vec![create_speaker_info("Bedroom", true)],
             },
             Group {
                 name: "Bathroom".to_string(),
-                speakers: vec!["Bathroom".to_string()],
+                speakers: vec![create_speaker_info("Bathroom", true)],
             },
             Group {
                 name: "Office".to_string(),
-                speakers: vec!["Office".to_string()],
+                speakers: vec![create_speaker_info("Office", true)],
             },
             // Grouped speakers
             Group {
                 name: "Living Room".to_string(),
-                speakers: vec!["Living Room".to_string(), "Kitchen".to_string()],
+                speakers: vec![
+                    create_speaker_info("Living Room", true),
+                    create_speaker_info("Kitchen", false),
+                ],
             },
             Group {
                 name: "Master Suite".to_string(),
-                speakers: vec!["Master Suite".to_string(), "Master Bathroom".to_string(), "Walk-in Closet".to_string()],
+                speakers: vec![
+                    create_speaker_info("Master Suite", true),
+                    create_speaker_info("Master Bathroom", false),
+                    create_speaker_info("Walk-in Closet", false),
+                ],
             },
             // Another ungrouped speaker
             Group {
                 name: "Garage".to_string(),
-                speakers: vec!["Garage".to_string()],
+                speakers: vec![create_speaker_info("Garage", true)],
             },
         ],
     }
@@ -460,19 +475,22 @@ mod tests {
             groups: vec![
                 Group {
                     name: "Roam 2".to_string(),
-                    speakers: vec!["Roam 2".to_string()],
+                    speakers: vec![create_speaker_info("Roam 2", true)],
                 },
                 Group {
                     name: "Bathroom".to_string(),
-                    speakers: vec!["Bathroom".to_string()],
+                    speakers: vec![create_speaker_info("Bathroom", true)],
                 },
                 Group {
                     name: "Kitchen".to_string(),
-                    speakers: vec!["Kitchen".to_string(), "Living Room".to_string()],
+                    speakers: vec![
+                        create_speaker_info("Kitchen", true),
+                        create_speaker_info("Living Room", false),
+                    ],
                 },
                 Group {
                     name: "Bedroom".to_string(),
-                    speakers: vec!["Bedroom".to_string()],
+                    speakers: vec![create_speaker_info("Bedroom", true)],
                 },
             ],
         };
@@ -526,7 +544,7 @@ mod tests {
             groups: vec![
                 Group {
                     name: "Only Speaker".to_string(),
-                    speakers: vec!["Only Speaker".to_string()],
+                    speakers: vec![create_speaker_info("Only Speaker", true)],
                 },
             ],
         };
@@ -611,25 +629,25 @@ mod tests {
         // Create 200 groups with varying configurations
         for i in 1..=200 {
             let group_name = format!("Zone {}", i);
-            let mut speakers = vec![group_name.clone()];
+            let mut speakers = vec![create_speaker_info(&group_name, true)];
             
             // Create groups with different sizes to test various scenarios
             match i % 10 {
                 0 => {
                     // Large groups (10 speakers)
                     for j in 1..10 {
-                        speakers.push(format!("Zone {} Speaker {}", i, j));
+                        speakers.push(create_speaker_info(&format!("Zone {} Speaker {}", i, j), false));
                     }
                 }
                 5 => {
                     // Medium groups (5 speakers)
                     for j in 1..5 {
-                        speakers.push(format!("Zone {} Speaker {}", i, j));
+                        speakers.push(create_speaker_info(&format!("Zone {} Speaker {}", i, j), false));
                     }
                 }
                 2 | 4 | 6 | 8 => {
                     // Small groups (2 speakers)
-                    speakers.push(format!("Zone {} Secondary", i));
+                    speakers.push(create_speaker_info(&format!("Zone {} Secondary", i), false));
                 }
                 _ => {
                     // Single speaker groups (already have coordinator)

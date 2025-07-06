@@ -37,18 +37,21 @@ pub fn app_reducer(state: &mut AppState, action: AppAction) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{View, Group};
+    use crate::types::{View, Group, SpeakerInfo};
 
     fn create_test_topology() -> Topology {
         Topology {
             groups: vec![
                 Group {
                     name: "Living Room".to_string(),
-                    speakers: vec!["Living Room".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Living Room", true)],
                 },
                 Group {
                     name: "Kitchen".to_string(),
-                    speakers: vec!["Kitchen".to_string(), "Dining Room".to_string()],
+                    speakers: vec![
+                        SpeakerInfo::from_name("Kitchen", true),
+                        SpeakerInfo::from_name("Dining Room", false),
+                    ],
                 },
             ],
         }
@@ -59,15 +62,15 @@ mod tests {
             groups: vec![
                 Group {
                     name: "Bedroom".to_string(),
-                    speakers: vec!["Bedroom".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Bedroom", true)],
                 },
                 Group {
                     name: "Office".to_string(),
-                    speakers: vec!["Office".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Office", true)],
                 },
                 Group {
                     name: "Bathroom".to_string(),
-                    speakers: vec!["Bathroom".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Bathroom", true)],
                 },
             ],
         }
@@ -188,7 +191,7 @@ mod tests {
             groups: vec![
                 Group {
                     name: "Solo Speaker".to_string(),
-                    speakers: vec!["Solo Speaker".to_string()],
+                    speakers: vec![SpeakerInfo::from_name("Solo Speaker", true)],
                 },
             ],
         };
