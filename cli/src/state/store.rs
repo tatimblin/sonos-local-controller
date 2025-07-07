@@ -10,7 +10,6 @@ pub struct AppState {
   pub topology: Option<Topology>,
   pub system: Option<Arc<System>>,
   pub selected_speaker_uuid: Option<String>,
-  pub selected_group_uuid: Option<String>,
 }
 
 impl Default for AppState {
@@ -21,7 +20,6 @@ impl Default for AppState {
       topology: None,
       system: None,
       selected_speaker_uuid: None,
-      selected_group_uuid: None,
     }
   }
 }

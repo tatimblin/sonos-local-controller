@@ -3,7 +3,6 @@ mod hooks;
 mod views;
 mod types;
 mod widgets;
-mod commands;
 
 use std::io;
 use std::sync::Arc;

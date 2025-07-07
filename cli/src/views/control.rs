@@ -28,10 +28,11 @@ impl ControlView {
         Self { topology_list }
     }
 
+    // TODO (ttimblin): remove match now that all types have `uuid`
     fn handle_selection(&self, item: &HierarchicalItem, store: &Store) {
       match item {
         HierarchicalItem::Group { name: _, uuid, .. } => {
-          store.dispatch(AppAction::SetSelectedGroupUuid(uuid.clone()));
+          store.dispatch(AppAction::SetSelectedSpeakerUuid(uuid.clone()));
         }
         HierarchicalItem::Speaker { name: _, uuid, .. } => {
           store.dispatch(AppAction::SetSelectedSpeakerUuid(uuid.clone()));
