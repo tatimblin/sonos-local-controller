@@ -1,4 +1,4 @@
-use crate::types::{Topology, Group, SpeakerInfo};
+use crate::types::{Topology, Group};
 use super::selectable_list::SelectableList;
 use ratatui::{layout::Rect, Frame};
 
@@ -45,6 +45,7 @@ impl TopologyFlattener {
             // Add the group itself
             let group_item = HierarchicalItem::Group {
                 name: group_name.clone(),
+                uuid: group.speakers[0].uuid.clone(), // TODO (ttimblin): get the coordinator
                 member_count: group.speakers.len(),
             };
             let group_display = Self::format_group_safe(group, &group_name);
@@ -73,7 +74,12 @@ impl TopologyFlattener {
                     speaker.name.clone()
                 };
 
-                let speaker_item = HierarchicalItem::from_speaker(&safe_speaker_name, &group_name, speaker.is_coordinator);
+                let speaker_item = HierarchicalItem::from_speaker(
+                    &safe_speaker_name,
+                    &speaker.uuid,
+                    &group_name,
+                    speaker.is_coordinator
+                );
                 let speaker_display = Self::format_speaker(&safe_speaker_name, 1);
                 items.push(speaker_item);
                 display_strings.push(speaker_display);
@@ -145,6 +151,8 @@ pub enum HierarchicalItem {
     Group {
         /// Name of the coordinator speaker for this group
         name: String,
+        /// UUID of the coordinator speaker for this group
+        uuid: String,
         /// Number of member speakers in this group
         member_count: usize,
     },
@@ -152,6 +160,8 @@ pub enum HierarchicalItem {
     Speaker {
         /// Human-readable name for this speaker
         name: String,
+        /// UUID for this speaker
+        uuid: String,
         /// Name of the group this speaker belongs to
         group_name: String,
         /// Whether this speaker is the coordinator of its group
@@ -161,6 +171,8 @@ pub enum HierarchicalItem {
     Satellite {
         /// Human-readable name for this satellite speaker
         name: String,
+        /// UUID for this satellite speaker
+        uuid: String,
         /// Name of the parent speaker this satellite belongs to
         parent_speaker_name: String,
         /// Name of the group this satellite's parent belongs to
@@ -193,23 +205,26 @@ impl HierarchicalItem {
     pub fn from_group(group: &Group) -> Self {
         HierarchicalItem::Group {
             name: group.name.clone(),
+            uuid: group.speakers[0].uuid.clone(),
             member_count: group.speakers.len(),
         }
     }
 
     /// Creates a HierarchicalItem::Speaker from speaker name and group info
-    pub fn from_speaker(speaker_name: &str, group_name: &str, is_coordinator: bool) -> Self {
+    pub fn from_speaker(speaker_name: &str, uuid: &str, group_name: &str, is_coordinator: bool) -> Self {
         HierarchicalItem::Speaker {
             name: speaker_name.to_string(),
+            uuid: uuid.to_string(),
             group_name: group_name.to_string(),
             is_coordinator,
         }
     }
 
     /// Creates a HierarchicalItem::Satellite from satellite info
-    pub fn from_satellite(satellite_name: &str, parent_speaker_name: &str, group_name: &str) -> Self {
+    pub fn from_satellite(satellite_name: &str, uuid: &str, parent_speaker_name: &str, group_name: &str) -> Self {
         HierarchicalItem::Satellite {
             name: satellite_name.to_string(),
+            uuid: uuid.to_string(),
             parent_speaker_name: parent_speaker_name.to_string(),
             group_name: group_name.to_string(),
         }
@@ -422,8 +437,9 @@ mod tests {
         let item = HierarchicalItem::from_group(&group);
 
         match item {
-            HierarchicalItem::Group { name, member_count } => {
+            HierarchicalItem::Group { name, uuid, member_count } => {
                 assert_eq!(name, "Living Room");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(member_count, 1);
             }
             _ => panic!("Expected Group variant"),
@@ -432,11 +448,17 @@ mod tests {
 
     #[test]
     fn test_hierarchical_item_speaker_creation() {
-        let item = HierarchicalItem::from_speaker("Living Room", "Living Room", true);
+        let item = HierarchicalItem::from_speaker(
+            "Living Room",
+            "RINCON_804AF2AA2FA201400",
+            "Living Room",
+            true
+        );
 
         match item {
-            HierarchicalItem::Speaker { name, group_name, is_coordinator } => {
+            HierarchicalItem::Speaker { name, uuid, group_name, is_coordinator } => {
                 assert_eq!(name, "Living Room");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(group_name, "Living Room");
                 assert!(is_coordinator);
             }
@@ -446,11 +468,17 @@ mod tests {
 
     #[test]
     fn test_hierarchical_item_satellite_creation() {
-        let item = HierarchicalItem::from_satellite("Surround Left", "Living Room", "Living Room");
+        let item = HierarchicalItem::from_satellite(
+            "Surround Left",
+            "RINCON_804AF2AA2FA201400",
+            "Living Room",
+            "Living Room"
+        );
 
         match item {
-            HierarchicalItem::Satellite { name, parent_speaker_name, group_name } => {
+            HierarchicalItem::Satellite { name, uuid, parent_speaker_name, group_name } => {
                 assert_eq!(name, "Surround Left");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(parent_speaker_name, "Living Room");
                 assert_eq!(group_name, "Living Room");
             }
@@ -464,10 +492,20 @@ mod tests {
         let group_item = HierarchicalItem::from_group(&group);
         assert_eq!(group_item.item_type(), ItemType::Group);
 
-        let speaker_item = HierarchicalItem::from_speaker("Living Room", "Living Room", false);
+        let speaker_item = HierarchicalItem::from_speaker(
+            "Living Room",
+            "RINCON_804AF2AA2FA201400",
+            "Living Room",
+            false
+        );
         assert_eq!(speaker_item.item_type(), ItemType::Speaker);
 
-        let satellite_item = HierarchicalItem::from_satellite("Surround Left", "Living Room", "Living Room");
+        let satellite_item = HierarchicalItem::from_satellite(
+            "Surround Left",
+            "RINCON_804AF2AA2FA201400",
+            "Living Room",
+            "Living Room"
+        );
         assert_eq!(satellite_item.item_type(), ItemType::Satellite);
     }
 
@@ -482,8 +520,9 @@ mod tests {
 
         // Check the group
         match &items[0] {
-            HierarchicalItem::Group { name, member_count } => {
+            HierarchicalItem::Group { name, uuid, member_count } => {
                 assert_eq!(name, "Living Room");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(*member_count, 1);
             }
             _ => panic!("Expected Group at index 0"),
@@ -492,8 +531,9 @@ mod tests {
 
         // Check the speaker
         match &items[1] {
-            HierarchicalItem::Speaker { name, group_name, is_coordinator } => {
+            HierarchicalItem::Speaker { name, uuid, group_name, is_coordinator } => {
                 assert_eq!(name, "Living Room");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(group_name, "Living Room");
                 assert!(*is_coordinator);
             }
@@ -517,8 +557,9 @@ mod tests {
 
         // First group's coordinator (Living Room)
         match &items[1] {
-            HierarchicalItem::Speaker { name, group_name, is_coordinator } => {
+            HierarchicalItem::Speaker { name, uuid, group_name, is_coordinator } => {
                 assert_eq!(name, "Living Room");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(group_name, "Living Room");
                 assert!(*is_coordinator);
             }
@@ -527,8 +568,9 @@ mod tests {
 
         // First group's second member (Kitchen)
         match &items[2] {
-            HierarchicalItem::Speaker { name, group_name, is_coordinator } => {
+            HierarchicalItem::Speaker { name, uuid, group_name, is_coordinator } => {
                 assert_eq!(name, "Kitchen");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(group_name, "Living Room");
                 assert!(!*is_coordinator);
             }
@@ -541,8 +583,9 @@ mod tests {
 
         // Second group's speaker
         match &items[4] {
-            HierarchicalItem::Speaker { name, group_name, is_coordinator } => {
+            HierarchicalItem::Speaker { name, uuid, group_name, is_coordinator } => {
                 assert_eq!(name, "Bedroom");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(group_name, "Bedroom");
                 assert!(*is_coordinator);
             }
@@ -583,8 +626,9 @@ mod tests {
         
         // Verify the valid group is processed correctly
         match &items[0] {
-            HierarchicalItem::Group { name, member_count } => {
+            HierarchicalItem::Group { name, uuid, member_count } => {
                 assert_eq!(name, "Valid Group");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(*member_count, 1);
             }
             _ => panic!("Expected Group at index 0"),
@@ -700,8 +744,9 @@ mod tests {
         assert!(selected.is_some());
         
         match selected.unwrap() {
-            HierarchicalItem::Group { name, member_count } => {
+            HierarchicalItem::Group { name, uuid, member_count } => {
                 assert_eq!(name, "Living Room");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(*member_count, 1);
             }
             _ => panic!("Expected Group to be selected"),
@@ -720,8 +765,9 @@ mod tests {
         assert!(selected.is_some());
         
         match selected.unwrap() {
-            HierarchicalItem::Speaker { name, group_name, is_coordinator } => {
+            HierarchicalItem::Speaker { name, uuid, group_name, is_coordinator } => {
                 assert_eq!(name, "Living Room");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(group_name, "Living Room");
                 assert!(*is_coordinator);
             }
@@ -766,8 +812,9 @@ mod tests {
         // Check group
         let group_item = topology_list.selected_item().unwrap();
         match group_item {
-            HierarchicalItem::Group { name, member_count } => {
+            HierarchicalItem::Group { name, uuid, member_count } => {
                 assert_eq!(name, "Bedroom");
+                assert_eq!(uuid, "RINCON_804AF2AA2FA201400");
                 assert_eq!(*member_count, 1);
             }
             _ => panic!("Expected Group"),
@@ -1136,7 +1183,7 @@ mod tests {
 mod topology_list_tests {
     use super::*;
     use ratatui::{backend::TestBackend, Terminal};
-    use crate::types::{Topology, Group};
+    use crate::types::{Topology, Group, SpeakerInfo};
 
     fn create_test_group() -> Group {
         Group {

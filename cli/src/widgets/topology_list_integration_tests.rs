@@ -582,8 +582,9 @@ mod tests {
                 // Access item properties to ensure computation happens
                 if let Some(item) = list.selected_item() {
                     match item {
-                        HierarchicalItem::Group { name, member_count } => {
+                        HierarchicalItem::Group { name, uuid, member_count } => {
                             assert!(!name.is_empty());
+                            assert!(!uuid.is_empty());
                             assert!(*member_count > 0);
                         }
                         HierarchicalItem::Speaker { name, group_name, .. } => {
