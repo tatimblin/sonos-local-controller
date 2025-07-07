@@ -48,7 +48,6 @@ impl SelectableList {
     
     let i = self.state.selected().unwrap_or(0);
     let next = (i + 1) % self.items.len();
-    self.state.select(None);
     self.state.select(Some(next));
   }
 
@@ -61,7 +60,6 @@ impl SelectableList {
       Some(i) => if i == 0 { self.items.len() - 1 } else { i - 1 },
       None => 0,
     };
-    self.state.select(None);
     self.state.select(Some(i));
   }
 

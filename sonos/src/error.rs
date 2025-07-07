@@ -6,6 +6,7 @@ pub enum SonosError {
   DeviceUnreachable,
   BadResponse(u16),
   DeviceNotFound(String),
+  NetworkTimeout,
 }
 
 impl fmt::Display for SonosError {
@@ -15,6 +16,7 @@ impl fmt::Display for SonosError {
       SonosError::DeviceUnreachable => write!(f, "Failed to call Sonos endpoint"),
       SonosError::BadResponse(code) => write!(f, "Received a non-success ({}) response from Sonos", code),
       SonosError::DeviceNotFound(identifier) => write!(f, "Couldn't find a device by the given identifier ({})", identifier),
+      SonosError::NetworkTimeout => write!(f, "Network request timed out"),
     }
   }
 }
