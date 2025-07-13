@@ -1,23 +1,36 @@
-use ratatui::Frame;
+use ratatui::{layout::Rect, Frame};
 
-use crate::{topology::topology_list::TopologyList, widgets::selectable_list::SelectableList};
+use crate::{topology::{topology_item::TopologyItem, topology_list::TopologyList}, widgets::selectable_list::SelectableList};
 
 pub struct SpeakerList {
   widget: SelectableList,
+  uuids: Vec<String>,
 }
 
 impl SpeakerList {
-  pub fn new(_: &TopologyList) -> Self {
+  pub fn new(topology: &TopologyList) -> Self {
+    let (items, uuids): (Vec<String>, Vec<String>) = topology
+      .items
+      .iter()
+      .enumerate()
+      .map(|(i, item)| match item {
+        TopologyItem::Group { uuid } => (format!("Group: {uuid}"), uuid.clone()),
+        TopologyItem::Speaker { uuid } => (format!("Speaker: {uuid}"), uuid.clone()),
+        TopologyItem::Satellite { uuid } => (format!("Satellite: {uuid}"), uuid.clone()),
+      })
+      .unzip();
+
     Self {
       widget: SelectableList::new(
         "Topology",
-        vec!["One".to_string(), "Two".to_string()]
-      )
+        items
+      ),
+      uuids
     }
   }
 
-  pub fn draw(&mut self, frame: &mut Frame) {
-    self.widget.draw(frame, frame.area());
+  pub fn draw(&mut self, frame: &mut Frame, layout: Rect) {
+    self.widget.draw(frame, layout);
   }
 
   pub fn next(&mut self) {
@@ -28,12 +41,12 @@ impl SpeakerList {
     self.widget.previous();
   }
 
-  pub fn selected(&mut self) -> Option<usize> {
+  fn selected(&self) -> Option<usize> {
     self.widget.selected()
   }
 
-  pub fn len(&self) -> usize {
-    self.widget.len()
+  pub fn selected_uuid(&self) -> Option<&str> {
+    self.selected().and_then(|i| self.uuids.get(i).map(String::as_str))
   }
 }
 

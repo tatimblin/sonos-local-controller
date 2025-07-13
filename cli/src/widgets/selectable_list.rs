@@ -21,8 +21,8 @@ impl SelectableList {
     }
 
     Self {
-      items,
       title: title.to_string(),
+      items,
       state,
     }
   }

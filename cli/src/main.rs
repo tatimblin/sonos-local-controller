@@ -50,7 +50,7 @@ impl App {
         }
         ViewType::Control => {
           log::debug!("Switching to control view");
-          self.current_view = Box::new(ControlView::new(&self.store));
+          self.current_view = Box::new(ControlView::new(self.store.clone()));
           self.current_view_type = ViewType::Control;
         }
       }

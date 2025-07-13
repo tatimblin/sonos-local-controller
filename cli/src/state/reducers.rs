@@ -11,7 +11,7 @@ pub enum AppAction {
     SetStatusMessage(String),
     SetTopology(TopologyList),
     SetSystem(Arc<System>),
-    SetSelectedSpeakerUuid(String),
+    ToggleSelect(String),
     ClearSelection,
 }
 
@@ -29,8 +29,8 @@ impl std::fmt::Debug for AppAction {
                 f.debug_tuple("SetTopology").field(topology).finish()
             }
             AppAction::SetSystem(_) => f.debug_tuple("SetSystem").field(&"Arc<System>").finish(),
-            AppAction::SetSelectedSpeakerUuid(uuid) => {
-                f.debug_tuple("SetSelectedSpeakerUuid").field(uuid).finish()
+            AppAction::ToggleSelect(uuid) => {
+                f.debug_tuple("Select").field(uuid).finish()
             }
             AppAction::ClearSelection => f.debug_tuple("ClearSelection").finish(),
         }
@@ -56,13 +56,17 @@ pub fn app_reducer(state: &mut AppState, action: AppAction) {
             log::debug!("SetSystem action received");
             state.system = Some(system);
         }
-        AppAction::SetSelectedSpeakerUuid(uuid) => {
-            log::debug!("SetSelectedSpeakerUuid action received: {}", uuid);
-            state.selected_speaker_uuid = Some(uuid);
+        AppAction::ToggleSelect(uuid) => {
+            log::debug!("Select action received: {}", uuid);
+            if let Some(pos) = state.selected_speaker_uuids.iter().position(|u| *u == uuid) {
+                state.selected_speaker_uuids.remove(pos);
+            } else {
+                state.selected_speaker_uuids.push(uuid);
+            }
         }
         AppAction::ClearSelection => {
             log::debug!("ClearSelection action received");
-            state.selected_speaker_uuid = None;
+            state.selected_speaker_uuids = vec![];
         }
     }
 }

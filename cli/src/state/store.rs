@@ -10,7 +10,7 @@ pub struct AppState {
   pub status_message: String,
   pub topology: Option<TopologyList>,
   pub system: Option<Arc<System>>,
-  pub selected_speaker_uuid: Option<String>,
+  pub selected_speaker_uuids: Vec<String>,
 }
 
 impl Default for AppState {
@@ -20,7 +20,7 @@ impl Default for AppState {
       status_message: "loading...".to_owned(),
       topology: None,
       system: None,
-      selected_speaker_uuid: None,
+      selected_speaker_uuids: vec![],
     }
   }
 }
