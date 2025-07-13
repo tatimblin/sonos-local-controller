@@ -76,6 +76,10 @@ pub struct Topology {
 }
 
 impl Topology {
+    pub fn get_speakers(&self) -> Vec<ZoneGroup> {
+        self.zone_groups
+    }
+
     /// Returns the total number of zone groups in the topology
     pub fn zone_group_count(&self) -> usize {
         self.zone_groups.len()

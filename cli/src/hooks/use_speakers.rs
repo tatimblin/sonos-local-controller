@@ -5,7 +5,7 @@ use sonos::{ SpeakerTrait, System, SystemEvent };
 
 use crate::state::store::Store;
 use crate::state::reducers::AppAction;
-use crate::types::{Topology, Group};
+use crate::topology::TopologyList;
 
 pub fn use_speakers(store: &Store, mut render_callback: impl FnMut() -> io::Result<()>) -> io::Result<()> {
   let mut system = System::new()?;
@@ -18,30 +18,9 @@ pub fn use_speakers(store: &Store, mut render_callback: impl FnMut() -> io::Resu
       },
       SystemEvent::TopologyReady(sonos_topology) => {
         debug!("TopologyReady event received");
-        
-        // Transform sonos topology to CLI topology structure with error handling
-        match transform_topology(&sonos_topology) {
-          Ok(cli_topology) => {
-            debug!("Topology transformation successful, dispatching SetTopology action");
-            
-            // Dispatch SetTopology action to update the store
-            store.dispatch(AppAction::SetTopology(cli_topology));
-            
-            // Update status message to indicate topology is ready
-            store.dispatch(AppAction::SetStatusMessage("Topology loaded".to_string()));
-          }
-          Err(err) => {
-            error!("Failed to transform topology: {}", err);
-            
-            // Update status message to indicate the error, but allow app to continue
-            store.dispatch(AppAction::SetStatusMessage(
-              format!("Topology error: {}", err)
-            ));
-            
-            // Don't return early - let the application continue functioning
-          }
-        }
-        
+        let topology = TopologyList.new(sonos_topology);
+        store.dispatch(AppAction::SetTopology(topology));
+
         render_callback()?;
       }
       _ => {}

@@ -144,55 +144,35 @@ impl TopologyFlattener {
     }
 }
 
-/// Represents the different types of items that can be selected in the hierarchical list
 #[derive(Debug, Clone, PartialEq)]
 pub enum HierarchicalItem {
-    /// A group containing one or more speakers
     Group {
-        /// Name of the coordinator speaker for this group
         name: String,
-        /// UUID of the coordinator speaker for this group
         uuid: String,
-        /// Number of member speakers in this group
         member_count: usize,
     },
-    /// A speaker in the Sonos system
     Speaker {
-        /// Human-readable name for this speaker
         name: String,
-        /// UUID for this speaker
         uuid: String,
-        /// Name of the group this speaker belongs to
         group_name: String,
-        /// Whether this speaker is the coordinator of its group
         is_coordinator: bool,
     },
-    /// A satellite speaker (e.g., surround speakers in home theater setup)
     Satellite {
-        /// Human-readable name for this satellite speaker
         name: String,
-        /// UUID for this satellite speaker
         uuid: String,
-        /// Name of the parent speaker this satellite belongs to
         parent_speaker_name: String,
-        /// Name of the group this satellite's parent belongs to
         group_name: String,
     },
 }
 
-/// Enum for identifying the type of a hierarchical item
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ItemType {
-    /// Item is a group
     Group,
-    /// Item is a speaker
     Speaker,
-    /// Item is a satellite speaker
     Satellite,
 }
 
 impl HierarchicalItem {
-    /// Returns the type of this hierarchical item
     pub fn item_type(&self) -> ItemType {
         match self {
             HierarchicalItem::Group { .. } => ItemType::Group,
@@ -234,20 +214,11 @@ impl HierarchicalItem {
 /// Widget for displaying a hierarchical list of Sonos topology with zone groups and speakers
 #[derive(Clone)]
 pub struct TopologyList {
-    /// The underlying selectable list widget for navigation and rendering
     list: SelectableList,
-    /// The hierarchical items that can be selected
     items: Vec<HierarchicalItem>,
 }
 
 impl TopologyList {
-    /// Creates a new TopologyList widget from a simplified Topology reference
-    /// 
-    /// # Arguments
-    /// * `topology` - Reference to the simplified Sonos topology data
-    /// 
-    /// # Returns
-    /// A new TopologyList widget ready for display and navigation
     pub fn new(topology: &Topology) -> Self {
         let (items, display_strings) = TopologyFlattener::flatten(topology);
         let list = SelectableList::new("Topology", display_strings);
@@ -258,45 +229,16 @@ impl TopologyList {
         }
     }
 
-    /// Returns the currently selected hierarchical item
-    /// 
-    /// This method provides safe access to the currently selected item with proper
-    /// error handling for edge cases like empty lists or invalid selection indices.
-    /// 
-    /// # Returns
-    /// * `Some(&HierarchicalItem)` - Reference to the selected item if valid selection exists
-    /// * `None` - If no item is selected, list is empty, or selection index is invalid
-    /// 
-    /// # Examples
-    /// ```
-    /// let topology_list = TopologyList::new(&topology);
-    /// match topology_list.selected_item() {
-    ///     Some(HierarchicalItem::Group { name, .. }) => {
-    ///         println!("Selected group: {}", name);
-    ///     }
-    ///     Some(HierarchicalItem::Speaker { name, .. }) => {
-    ///         println!("Selected speaker: {}", name);
-    ///     }
-    ///     None => println!("No item selected"),
-    /// }
-    /// ```
-    pub fn selected_item(&self) -> Option<&HierarchicalItem> {
-        // Handle empty list case
+    pub fn get_selected_item(&self) -> Option<&HierarchicalItem> {
         if self.items.is_empty() {
             return None;
         }
 
-        // Get selected index and validate it's within bounds
         match self.list.selected() {
             Some(index) => {
-                // Double-check bounds to handle any potential race conditions
-                // or inconsistencies between the list widget and our items
                 if index < self.items.len() {
                     self.items.get(index)
                 } else {
-                    // Log error in debug builds for development
-                    #[cfg(debug_assertions)]
-                    eprintln!("Warning: Selection index {} out of bounds for {} items", index, self.items.len());
                     None
                 }
             }
@@ -304,59 +246,26 @@ impl TopologyList {
         }
     }
 
-    /// Returns the type of the currently selected item
-    /// 
-    /// This is a convenience method that combines selection retrieval with type
-    /// identification, providing safe access to the item type without needing
-    /// to pattern match on the full HierarchicalItem enum.
-    /// 
-    /// # Returns
-    /// * `Some(ItemType)` - The type of the selected item (Group or Speaker)
-    /// * `None` - If no item is selected or selection is invalid
-    /// 
-    /// # Examples
-    /// ```
-    /// match topology_list.selected_item_type() {
-    ///     Some(ItemType::Group) => handle_group_selection(),
-    ///     Some(ItemType::Speaker) => handle_speaker_selection(),
-    ///     None => handle_no_selection(),
-    /// }
-    /// ```
-    pub fn selected_item_type(&self) -> Option<ItemType> {
-        self.selected_item().map(|item| item.item_type())
+    pub fn get_selected_item_type(&self) -> Option<ItemType> {
+        self.get_selected_item().map(|item| item.item_type())
     }
 
-    /// Renders the hierarchical topology list to the terminal
-    /// 
-    /// # Arguments
-    /// * `frame` - The ratatui Frame to render to
-    /// * `area` - The rectangular area to render within
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
         self.list.draw(frame, area);
     }
 
-    /// Moves selection to the next item in the hierarchical list
-    /// Wraps to the first item when reaching the end
-    /// Does nothing if the list is empty
     pub fn next(&mut self) {
         if !self.items.is_empty() {
             self.list.next();
         }
     }
 
-    /// Moves selection to the previous item in the hierarchical list
-    /// Wraps to the last item when reaching the beginning
-    /// Does nothing if the list is empty
     pub fn previous(&mut self) {
         if !self.items.is_empty() {
             self.list.previous();
         }
     }
 
-    /// Returns the index of the currently selected item
-    /// 
-    /// # Returns
-    /// Some index of the selected item, or None if no selection
     pub fn selected(&self) -> Option<usize> {
         if self.items.is_empty() {
             None
@@ -365,18 +274,10 @@ impl TopologyList {
         }
     }
 
-    /// Returns the total number of items in the hierarchical list
-    /// 
-    /// # Returns
-    /// The number of selectable items (groups and speakers)
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
-    /// Returns true if the topology list is empty
-    /// 
-    /// # Returns
-    /// true if there are no items to display, false otherwise
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }

@@ -5,92 +5,63 @@ pub enum View {
 }
 
 #[derive(Debug, Clone)]
-pub struct Topology {
-    pub groups: Vec<Group>,
+pub struct TopologyRef {
+    pub groups: Vec<GroupRef>,
 }
 
-impl Topology {
+impl TopologyRef {
     /// Find a speaker by UUID across all groups
-    pub fn get_speaker_by_uuid(&self, uuid: &str) -> Option<&SpeakerInfo> {
+    pub fn get_speaker_by_uuid(&self, uuid: &str) -> Option<&SpeakerRef> {
         self.groups.iter()
             .flat_map(|group| &group.speakers)
             .find(|speaker| speaker.uuid == uuid)
     }
 
     /// Find a group by UUID (using any speaker's UUID in the group)
-    pub fn get_group_by_uuid(&self, uuid: &str) -> Option<&Group> {
+    pub fn get_group_by_uuid(&self, uuid: &str) -> Option<&GroupRef> {
         self.groups.iter().find(|group| {
             group.speakers.iter().any(|speaker| speaker.uuid == uuid)
         })
     }
 
     /// Find a group by coordinator UUID
-    pub fn get_group_by_coordinator_uuid(&self, coordinator_uuid: &str) -> Option<&Group> {
+    pub fn get_group_by_coordinator_uuid(&self, coordinator_uuid: &str) -> Option<&GroupRef> {
         self.groups.iter().find(|group| {
             group.speakers.iter().any(|speaker| speaker.uuid == coordinator_uuid && speaker.is_coordinator)
         })
     }
 
     /// Get the selected group based on app state selection
-    pub fn get_selected_group(&self, selected_group_uuid: Option<&String>) -> Option<&Group> {
+    pub fn get_selected_group(&self, selected_group_uuid: Option<&String>) -> Option<&GroupRef> {
         selected_group_uuid
             .and_then(|uuid| self.get_group_by_coordinator_uuid(uuid))
     }
 
     /// Get the selected speaker based on app state selection
-    pub fn get_selected_speaker(&self, selected_speaker_uuid: Option<&String>) -> Option<&SpeakerInfo> {
+    pub fn get_selected_speaker(&self, selected_speaker_uuid: Option<&String>) -> Option<&SpeakerRef> {
         selected_speaker_uuid
             .and_then(|uuid| self.get_speaker_by_uuid(uuid))
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Group {
+pub struct GroupRef {
     pub name: String,        // Name of the coordinator speaker
-    pub speakers: Vec<SpeakerInfo>, // Information about all speakers in the group
+    pub speakers: Vec<SpeakerRef>, // Information about all speakers in the group
 }
 
-impl Group {
-    /// Pauses playback for this group by delegating to the System's zone group lookup
-    /// 
-    /// # Arguments
-    /// * `system` - Reference to the System containing zone group instances
-    /// 
-    /// # Returns
-    /// * `Ok(())` - If the pause command was successful
-    /// * `Err(SpeakerManagerError)` - If the group is not found or the command fails
-    pub fn pause(&self, system: &System) -> Result<(), SpeakerManagerError> {
-        system.get_zone_group_by_name(&self.name)
-            .ok_or_else(|| SpeakerManagerError::GroupNotFound(self.name.clone()))?
-            .pause(system)
-            .map_err(SpeakerManagerError::from)
-    }
-
-    /// Starts playback for this group by delegating to the System's zone group lookup
-    /// 
-    /// # Arguments
-    /// * `system` - Reference to the System containing zone group instances
-    /// 
-    /// # Returns
-    /// * `Ok(())` - If the play command was successful
-    /// * `Err(SpeakerManagerError)` - If the group is not found or the command fails
-    pub fn play(&self, system: &System) -> Result<(), SpeakerManagerError> {
-        system.get_zone_group_by_name(&self.name)
-            .ok_or_else(|| SpeakerManagerError::GroupNotFound(self.name.clone()))?
-            .play(system)
-            .map_err(SpeakerManagerError::from)
-    }
+impl GroupRef {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SpeakerInfo {
+pub struct SpeakerRef {
     pub name: String,        // Human-readable name of the speaker
     pub uuid: String,        // Unique identifier for the speaker
     pub ip: String,          // IP address of the speaker
     pub is_coordinator: bool, // Whether this speaker is the group coordinator
 }
 
-impl SpeakerInfo {
+impl SpeakerRef {
     /// Helper function to create a SpeakerInfo from a name for testing
     pub fn from_name(name: &str, is_coordinator: bool) -> Self {
         Self {
@@ -132,13 +103,13 @@ impl SpeakerInfo {
     }
 }
 
-impl PartialEq<str> for SpeakerInfo {
+impl PartialEq<str> for SpeakerRef {
     fn eq(&self, other: &str) -> bool {
         self.name == other
     }
 }
 
-impl PartialEq<&str> for SpeakerInfo {
+impl PartialEq<&str> for SpeakerRef {
     fn eq(&self, other: &&str) -> bool {
         self.name == *other
     }

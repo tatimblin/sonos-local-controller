@@ -380,25 +380,6 @@ mod network_scenario_tests {
     }
 
     #[test]
-    fn test_mock_zone_group_command_failures() {
-        let mut mock_system = create_mock_system_with_speakers();
-        
-        // Get a zone group and test normal operation
-        let zone_group = mock_system.get_zone_group_by_name("Mock Living Room").unwrap();
-        assert!(zone_group.play(&mock_system).is_ok());
-        assert!(zone_group.pause(&mock_system).is_ok());
-        
-        // Configure zone group lookup to fail
-        mock_system.set_network_config(MockNetworkConfig {
-            zone_group_lookup_fails: true,
-            ..Default::default()
-        });
-        
-        // Test zone group lookup failure
-        assert!(mock_system.get_zone_group_by_name("Mock Living Room").is_none());
-    }
-
-    #[test]
     fn test_network_delay_simulation() {
         let mut mock_system = MockSystem::new();
         

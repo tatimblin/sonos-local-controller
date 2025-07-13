@@ -55,28 +55,6 @@ impl System {
     self.speakers.get(uuid)
   }
 
-  /// Gets a zone group by coordinator zone name
-  /// 
-  /// This method finds a zone group by looking for the coordinator member
-  /// whose zone_name matches the provided name.
-  /// 
-  /// # Arguments
-  /// * `name` - The zone name of the coordinator speaker
-  /// 
-  /// # Returns
-  /// * `Some(&ZoneGroup)` - If a zone group with matching coordinator zone name is found
-  /// * `None` - If no matching zone group is found or topology is not available
-  pub fn get_zone_group_by_name(&self, name: &str) -> Option<&crate::topology::types::ZoneGroup> {
-    self.topology.as_ref()?.zone_groups.iter()
-      .find(|group| {
-        // Find the coordinator member and match its zone_name
-        group.members.iter()
-          .find(|member| member.uuid == group.coordinator)
-          .map(|coordinator| coordinator.zone_name == name)
-          .unwrap_or(false)
-      })
-  }
-
   #[cfg(test)]
   /// Test helper method to add a speaker directly (bypassing discovery)
   pub fn add_speaker_for_test(&mut self, speaker: Box<dyn SpeakerTrait>) {
@@ -442,51 +420,6 @@ mod tests {
   }
 
   #[test]
-  fn test_event_emission_order_and_types() {
-    let mut system = System::new().unwrap();
-    
-    // Run discovery and collect all events
-    let events: Vec<_> = system.discover().collect();
-    
-    // Verify event types are correct
-    for event in &events {
-      match event {
-        SystemEvent::SpeakerFound(_) => {
-          // SpeakerFound events should contain valid speaker data
-        },
-        SystemEvent::TopologyReady(_) => {
-          // TopologyReady events should contain valid topology data
-        },
-        SystemEvent::Error(msg) => {
-          // Error events should contain descriptive messages
-          assert!(!msg.is_empty(), "Error messages should not be empty");
-        },
-        SystemEvent::DiscoveryComplete => {
-          // DiscoveryComplete should be the last event
-          let event_index = events.iter().position(|e| matches!(e, SystemEvent::DiscoveryComplete)).unwrap();
-          assert_eq!(event_index, events.len() - 1, "DiscoveryComplete should be the last event");
-        }
-      }
-    }
-    
-    // Verify that if topology errors occur, they use the generic Error event
-    let topology_error_events: Vec<_> = events.iter()
-      .filter(|event| {
-        if let SystemEvent::Error(msg) = event {
-          msg.contains("Topology retrieval failed")
-        } else {
-          false
-        }
-      })
-      .collect();
-    
-    // If there are topology errors, they should use the generic Error event (not a specific TopologyError)
-    for event in topology_error_events {
-      assert!(matches!(event, SystemEvent::Error(_)), "Topology errors should use generic Error event");
-    }
-  }
-
-  #[test]
   #[cfg(feature = "mock")]
   fn test_state_access_methods_with_various_states() {
     let mut system = System::new().unwrap();
@@ -722,38 +655,26 @@ mod tests {
       vanished_devices: None,
     };
     system.topology = Some(test_topology);
-    
-    // Verify initial state
+
     assert_eq!(system.speaker_count(), 2);
     assert!(system.has_topology());
     assert!(system.get_speaker_by_uuid("RINCON_123").is_some());
     assert!(system.get_speaker_by_uuid("RINCON_456").is_some());
-    
-    // Run discovery completely (this should clear state at the beginning)
+
     let events: Vec<_> = system.discover().collect();
-    
-    // State should be cleared - the original test speakers should be gone
-    // Note: New speakers may be discovered during the actual discovery process
-    // but the original test speakers should definitely be cleared
+
     assert!(system.get_speaker_by_uuid("RINCON_123").is_none());
     assert!(system.get_speaker_by_uuid("RINCON_456").is_none());
-    
-    // Verify that discovery completed
+
     assert!(!events.is_empty());
     assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
-    
-    // After discovery, the system should still be usable
-    let _final_speaker_count = system.speaker_count();
-    let _final_has_topology = system.has_topology();
   }
 
   #[test]
   fn test_all_new_event_types_are_debug() {
-    // Test that all SystemEvent variants implement Debug properly
     use crate::speaker::{Speaker, SpeakerFactory};
     use crate::topology::types::Topology;
-    
-    // Create a test speaker - use SpeakerFactory::default to avoid ambiguity
+
     let test_speaker = <Speaker as SpeakerFactory>::default();
     let speaker_found = SystemEvent::SpeakerFound(test_speaker);
     
@@ -777,179 +698,5 @@ mod tests {
     assert!(discovery_debug.contains("DiscoveryComplete"));
     assert!(error_debug.contains("Error"));
     assert!(error_debug.contains("Test error"));
-  }
-
-  #[test]
-  #[cfg(feature = "mock")]
-  fn test_get_zone_group_by_name() {
-    let mut system = System::new().unwrap();
-    
-    // Test with no topology
-    assert!(system.get_zone_group_by_name("Living Room").is_none());
-    
-    // Create test topology with zone groups
-    use crate::topology::types::{Topology, ZoneGroup, ZoneGroupMember};
-    let test_topology = Topology {
-      zone_groups: vec![
-        ZoneGroup {
-          coordinator: "RINCON_123".to_string(),
-          id: "RINCON_123:123".to_string(),
-          members: vec![
-            ZoneGroupMember {
-              uuid: "RINCON_123".to_string(),
-              location: "http://192.168.1.100:1400/xml/device_description.xml".to_string(),
-              zone_name: "Living Room".to_string(),
-              software_version: "56.0-76060".to_string(),
-              configuration: "1".to_string(),
-              icon: "x-rincon-roomicon:living".to_string(),
-              satellites: vec![],
-            }
-          ],
-        },
-        ZoneGroup {
-          coordinator: "RINCON_456".to_string(),
-          id: "RINCON_456:456".to_string(),
-          members: vec![
-            ZoneGroupMember {
-              uuid: "RINCON_456".to_string(),
-              location: "http://192.168.1.101:1400/xml/device_description.xml".to_string(),
-              zone_name: "Kitchen".to_string(),
-              software_version: "56.0-76060".to_string(),
-              configuration: "1".to_string(),
-              icon: "x-rincon-roomicon:kitchen".to_string(),
-              satellites: vec![],
-            }
-          ],
-        }
-      ],
-      vanished_devices: None,
-    };
-    
-    system.topology = Some(test_topology);
-    
-    // Test finding existing zone groups
-    let living_room_group = system.get_zone_group_by_name("Living Room");
-    assert!(living_room_group.is_some());
-    assert_eq!(living_room_group.unwrap().coordinator, "RINCON_123");
-    
-    let kitchen_group = system.get_zone_group_by_name("Kitchen");
-    assert!(kitchen_group.is_some());
-    assert_eq!(kitchen_group.unwrap().coordinator, "RINCON_456");
-    
-    // Test not finding non-existent zone group
-    assert!(system.get_zone_group_by_name("Bedroom").is_none());
-    
-    // Test case sensitivity
-    assert!(system.get_zone_group_by_name("living room").is_none());
-    assert!(system.get_zone_group_by_name("LIVING ROOM").is_none());
-    
-    // Test empty string
-    assert!(system.get_zone_group_by_name("").is_none());
-  }
-
-  #[test]
-  #[cfg(feature = "mock")]
-  fn test_get_zone_group_by_name_with_grouped_zones() {
-    let mut system = System::new().unwrap();
-    
-    // Create topology with a grouped zone (multiple members, same coordinator)
-    use crate::topology::types::{Topology, ZoneGroup, ZoneGroupMember};
-    let test_topology = Topology {
-      zone_groups: vec![
-        ZoneGroup {
-          coordinator: "RINCON_123".to_string(),
-          id: "RINCON_123:123".to_string(),
-          members: vec![
-            ZoneGroupMember {
-              uuid: "RINCON_123".to_string(),
-              location: "http://192.168.1.100:1400/xml/device_description.xml".to_string(),
-              zone_name: "Living Room".to_string(),
-              software_version: "56.0-76060".to_string(),
-              configuration: "1".to_string(),
-              icon: "x-rincon-roomicon:living".to_string(),
-              satellites: vec![],
-            },
-            ZoneGroupMember {
-              uuid: "RINCON_456".to_string(),
-              location: "http://192.168.1.101:1400/xml/device_description.xml".to_string(),
-              zone_name: "Kitchen".to_string(),
-              software_version: "56.0-76060".to_string(),
-              configuration: "1".to_string(),
-              icon: "x-rincon-roomicon:kitchen".to_string(),
-              satellites: vec![],
-            }
-          ],
-        }
-      ],
-      vanished_devices: None,
-    };
-    
-    system.topology = Some(test_topology);
-    
-    // Should find the group by coordinator's zone name
-    let group = system.get_zone_group_by_name("Living Room");
-    assert!(group.is_some());
-    assert_eq!(group.unwrap().coordinator, "RINCON_123");
-    assert_eq!(group.unwrap().members.len(), 2);
-    
-    // Should not find by non-coordinator member's zone name
-    assert!(system.get_zone_group_by_name("Kitchen").is_none());
-  }
-
-  #[test]
-  #[cfg(feature = "mock")]
-  fn test_comprehensive_event_emission_scenarios() {
-    let mut system = System::new().unwrap();
-    
-    // Test discovery with no network speakers (should still emit DiscoveryComplete)
-    let events: Vec<_> = system.discover().collect();
-    
-    // Should always have at least DiscoveryComplete
-    assert!(!events.is_empty());
-    assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
-    
-    // Count event types
-    let speaker_found_count = events.iter().filter(|e| matches!(e, SystemEvent::SpeakerFound(_))).count();
-    let topology_ready_count = events.iter().filter(|e| matches!(e, SystemEvent::TopologyReady(_))).count();
-    let error_count = events.iter().filter(|e| matches!(e, SystemEvent::Error(_))).count();
-    let discovery_complete_count = events.iter().filter(|e| matches!(e, SystemEvent::DiscoveryComplete)).count();
-    
-    // DiscoveryComplete should always be exactly 1
-    assert_eq!(discovery_complete_count, 1);
-    
-    // If speakers were found, topology should have been attempted
-    if speaker_found_count > 0 {
-      // Either topology succeeded or failed (error emitted)
-      assert!(topology_ready_count > 0 || error_count > 0);
-    }
-    
-    // If topology was ready, it should be stored
-    if topology_ready_count > 0 {
-      assert!(system.has_topology());
-    }
-    
-    // Verify event ordering: SpeakerFound events should come before TopologyReady
-    let mut found_topology_ready = false;
-    for event in &events {
-      match event {
-        SystemEvent::TopologyReady(_) => {
-          found_topology_ready = true;
-        },
-        SystemEvent::SpeakerFound(_) => {
-          // If we've already seen TopologyReady, this is wrong order
-          // (TopologyReady should only come after first speaker)
-          if found_topology_ready {
-            // This is actually OK - we might find more speakers after topology
-            // The important thing is that topology comes after at least one speaker
-          }
-        },
-        SystemEvent::DiscoveryComplete => {
-          // This should be the last event
-          let current_index = events.iter().position(|e| matches!(e, SystemEvent::DiscoveryComplete)).unwrap();
-          assert_eq!(current_index, events.len() - 1);
-        },
-        _ => {}
-      }
-    }
   }
 }

@@ -384,14 +384,6 @@ impl MockSystem {
         self.speakers.get(uuid).map(|s| s.as_ref())
     }
 
-    pub fn get_zone_group_by_name(&self, name: &str) -> Option<&MockZoneGroup> {
-        if self.network_config.zone_group_lookup_fails {
-            return None;
-        }
-        
-        self.zone_groups.iter().find(|zg| zg.name == name)
-    }
-
     pub fn simulate_discovery(&self) -> Result<Vec<String>, SonosError> {
         if self.network_config.discovery_delay_ms > 0 {
             std::thread::sleep(std::time::Duration::from_millis(self.network_config.discovery_delay_ms));
@@ -575,23 +567,6 @@ mod tests {
         
         let not_found = system.get_speaker_by_uuid("RINCON_999");
         assert!(not_found.is_none());
-    }
-
-    #[test]
-    fn test_mock_system_zone_groups() {
-        let mut system = MockSystem::new();
-        
-        let mut zone_group = MockZoneGroup::new("RINCON_001", "Living Room");
-        zone_group.add_member("RINCON_002");
-        
-        system.add_zone_group(zone_group);
-        
-        assert_eq!(system.zone_group_count(), 1);
-        
-        let found_group = system.get_zone_group_by_name("Living Room");
-        assert!(found_group.is_some());
-        assert_eq!(found_group.unwrap().coordinator, "RINCON_001");
-        assert_eq!(found_group.unwrap().members.len(), 2);
     }
 
     #[test]
