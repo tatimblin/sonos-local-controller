@@ -23,7 +23,18 @@ impl ControlView {
 		let list_widget = store.with_state(|state| {
 			if let Some(topology) = &state.topology {
 				// Create topology list from actual topology data
-				SpeakerList::new(topology)
+				SpeakerList::new_with(
+					topology,
+					|uuid| {
+							format!("Group2: {uuid}")
+					},
+					|uuid| {
+							format!("Speaker2: {uuid}")
+					},
+					|uuid| {
+							format!("Satellite2: {uuid}")
+					}
+				)
 			} else {
 				// Create empty topology list for empty state
 				let empty_topology = TopologyList { items: vec!() };

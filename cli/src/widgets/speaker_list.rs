@@ -29,6 +29,37 @@ impl SpeakerList {
     }
   }
 
+  pub fn new_with<FGroup, FSpeaker, FSatellite>(
+    topology: &TopologyList,
+    group_item: FGroup,
+    speaker_item: FSpeaker,
+    satellite_item: FSatellite,
+  ) -> Self
+  where
+    FGroup: Fn(&String) -> (String + String),
+    FSpeaker: Fn(&String) -> (String + String),
+    FSatellite: Fn(&String) -> (String + String),
+  {
+    let (items, uuids): (Vec<String>, Vec<String>) = topology
+      .items
+      .iter()
+      .enumerate()
+      .map(|(i, item)| match item {
+        TopologyItem::Group { uuid } => (group_item(&uuid), uuid),
+        TopologyItem::Speaker { uuid } => (speaker_item(&uuid), uuid),
+        TopologyItem::Satellite { uuid } => (satellite_item(&uuid), uuid),
+      })
+      .unzip();
+
+    Self {
+      widget: SelectableList::new(
+        "Topology",
+        items
+      ),
+      uuids
+    }
+  }
+
   pub fn draw(&mut self, frame: &mut Frame, layout: Rect) {
     self.widget.draw(frame, layout);
   }
