@@ -1,13 +1,14 @@
 use std::sync::{ Arc, Mutex };
-use crate::types::*;
 use sonos::System;
+
+use crate::{topology::topology_list::TopologyList, views::ViewType};
 
 use super::reducers::{ AppAction, app_reducer };
 
 pub struct AppState {
-  pub view: View,
+  pub view: ViewType,
   pub status_message: String,
-  pub topology: Option<Topology>,
+  pub topology: Option<TopologyList>,
   pub system: Option<Arc<System>>,
   pub selected_speaker_uuid: Option<String>,
 }
@@ -15,7 +16,7 @@ pub struct AppState {
 impl Default for AppState {
   fn default() -> Self {
     Self {
-      view: View::Startup,
+      view: ViewType::Startup,
       status_message: "loading...".to_owned(),
       topology: None,
       system: None,

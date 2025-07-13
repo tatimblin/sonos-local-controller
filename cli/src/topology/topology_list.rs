@@ -2,12 +2,13 @@ use sonos::Topology;
 
 use crate::topology::topology_item::TopologyItem;
 
-struct TopologyList {
-	items: Vec<TopologyItem>
+#[derive(Debug, Clone)]
+pub struct TopologyList {
+	pub items: Vec<TopologyItem>
 }
 
 impl TopologyList {
-	fn new(topology: Topology) -> Self {
+	pub fn new(topology: Topology) -> Self {
 		let mut items: Vec<TopologyItem> = Vec::new();
 
 		if topology.zone_group_count() == 0 {
@@ -16,11 +17,14 @@ impl TopologyList {
 			};
 		}
 
-		for group in topology.zone_groups {
+		for group in topology.get_groups() {
 			let group_item = TopologyItem::from_group(&group);
 			items.push(group_item);
 
-			let speakers = group.speakers;
+			for speaker in group.get_speakers() {
+				let speaker_item = TopologyItem::from_speaker(&speaker);
+				items.push(speaker_item);
+			}
 		}
 
 		TopologyList { items }

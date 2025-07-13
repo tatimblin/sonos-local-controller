@@ -76,8 +76,8 @@ pub struct Topology {
 }
 
 impl Topology {
-    pub fn get_speakers(&self) -> Vec<ZoneGroup> {
-        self.zone_groups
+    pub fn get_groups(&self) -> &[ZoneGroup] {
+        &self.zone_groups
     }
 
     /// Returns the total number of zone groups in the topology
@@ -142,6 +142,10 @@ impl Topology {
 }
 
 impl ZoneGroup {
+    pub fn get_speakers(&self) -> &[ZoneGroupMember] {
+        &self.members
+    }
+
     /// Returns true if this zone group has multiple members (is a grouped zone)
     pub fn is_grouped(&self) -> bool {
         self.members.len() > 1

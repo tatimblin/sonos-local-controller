@@ -1,7 +1,6 @@
 mod state;
 mod hooks;
 mod views;
-mod types;
 mod widgets;
 mod topology;
 
@@ -16,6 +15,7 @@ use crate::state::store::Store;
 use crate::hooks::use_speakers::use_speakers;
 use crate::views::{
   View,
+  ViewType,
   startup::StartupView,
   control::ControlView,
 };
@@ -24,7 +24,7 @@ pub struct App {
   store: Arc<Store>,
   exit: bool,
   current_view: Box<dyn View>,
-  current_view_type: crate::types::View,
+  current_view_type: ViewType,
 }
 
 impl App {
@@ -33,7 +33,7 @@ impl App {
     Self {
       store: store.clone(),
       current_view: Box::new(StartupView::new(store.clone())),
-      current_view_type: crate::types::View::Startup,
+      current_view_type: ViewType::Startup,
       exit: false,
     }
   }
@@ -43,15 +43,15 @@ impl App {
 
     if current_state_view != self.current_view_type {
       match current_state_view {
-        crate::types::View::Startup => {
+        ViewType::Startup => {
           log::debug!("Switching to startup view");
           self.current_view = Box::new(StartupView::new(self.store.clone()));
-          self.current_view_type = crate::types::View::Startup;
+          self.current_view_type = ViewType::Startup;
         }
-        crate::types::View::Control => {
+        ViewType::Control => {
           log::debug!("Switching to control view");
           self.current_view = Box::new(ControlView::new(&self.store));
-          self.current_view_type = crate::types::View::Control;
+          self.current_view_type = ViewType::Control;
         }
       }
     }
