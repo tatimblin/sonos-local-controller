@@ -29,26 +29,17 @@ impl SpeakerList {
     }
   }
 
-  pub fn new_with<FGroup, FSpeaker, FSatellite>(
+  pub fn new_with<F>(
     topology: &TopologyList,
-    group_item: FGroup,
-    speaker_item: FSpeaker,
-    satellite_item: FSatellite,
+    item_fn: F
   ) -> Self
   where
-    FGroup: Fn(&String) -> (String + String),
-    FSpeaker: Fn(&String) -> (String + String),
-    FSatellite: Fn(&String) -> (String + String),
+    F: Fn(&TopologyItem) -> (String, String),
   {
     let (items, uuids): (Vec<String>, Vec<String>) = topology
       .items
       .iter()
-      .enumerate()
-      .map(|(i, item)| match item {
-        TopologyItem::Group { uuid } => (group_item(&uuid), uuid),
-        TopologyItem::Speaker { uuid } => (speaker_item(&uuid), uuid),
-        TopologyItem::Satellite { uuid } => (satellite_item(&uuid), uuid),
-      })
+      .map(|item| item_fn(item))
       .unzip();
 
     Self {

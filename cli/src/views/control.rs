@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::state::reducers::AppAction;
 use crate::state::store::Store;
+use crate::topology::topology_item::TopologyItem;
 use crate::topology::topology_list::TopologyList;
 use crate::widgets::speaker_list::SpeakerList;
 
@@ -25,14 +26,12 @@ impl ControlView {
 				// Create topology list from actual topology data
 				SpeakerList::new_with(
 					topology,
-					|uuid| {
-							format!("Group2: {uuid}")
-					},
-					|uuid| {
-							format!("Speaker2: {uuid}")
-					},
-					|uuid| {
-							format!("Satellite2: {uuid}")
+					|item| {
+						match item {
+							TopologyItem::Group { uuid } => (format!("Group2: {uuid}"), uuid.clone()),
+							TopologyItem::Speaker { uuid } => (format!("Speaker2: {uuid}"), uuid.clone()),
+							TopologyItem::Satellite { uuid } => (format!("Satellite2: {uuid}"), uuid.clone()),
+						}
 					}
 				)
 			} else {
