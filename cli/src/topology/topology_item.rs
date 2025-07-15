@@ -3,10 +3,11 @@ use sonos::{Satellite, ZoneGroup, ZoneGroupMember};
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopologyItem {
     Group { 
-			uuid: String
+			uuid: String,
+			name: String,
 		},
     Speaker {
-			uuid: String
+			uuid: String,
 		},
     Satellite {
 			uuid: String
@@ -24,6 +25,7 @@ impl TopologyItem {
 	pub fn from_group(group: &ZoneGroup) -> Self {
 		TopologyItem::Group {
 			uuid: group.id.to_string(),
+			name: group.get_name().to_string(),
 		}
 	}
 
@@ -49,7 +51,7 @@ impl TopologyItem {
 
 	pub fn get_uuid(&self) -> &str {
 		match self {
-			TopologyItem::Group { uuid }
+			TopologyItem::Group { uuid, .. }
 			| TopologyItem::Speaker { uuid }
 			| TopologyItem::Satellite { uuid } => uuid,
 		}

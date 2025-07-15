@@ -28,9 +28,9 @@ impl ControlView {
 					topology,
 					|item| {
 						match item {
-							TopologyItem::Group { uuid } => (format!("Group2: {uuid}"), uuid.clone()),
-							TopologyItem::Speaker { uuid } => (format!("Speaker2: {uuid}"), uuid.clone()),
-							TopologyItem::Satellite { uuid } => (format!("Satellite2: {uuid}"), uuid.clone()),
+							TopologyItem::Group { uuid, name } => (format!("Group: {name}"), uuid.clone()),
+							TopologyItem::Speaker { uuid } => (format!("  Speaker: {uuid}"), uuid.clone()),
+							TopologyItem::Satellite { uuid } => (format!("  Satellite: {uuid}"), uuid.clone()),
 						}
 					}
 				)

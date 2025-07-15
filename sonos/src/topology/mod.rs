@@ -7,6 +7,7 @@ pub mod client;
 pub mod constants;
 pub mod parser;
 pub mod types;
+pub mod impls;
 pub mod utils;
 
 // Re-export all public types and functions to maintain backward compatibility
