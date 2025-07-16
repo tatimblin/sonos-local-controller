@@ -46,10 +46,11 @@ impl ControlView {
 
 	fn get_selected_list(&self) -> String {
     self.store.with_state(|state| {
-      state.selected_speaker_uuids
-				.iter()
-				.map(|x| x.to_string() + ",")
-				.collect::<String>()
+      if let Some(locked_uuid) = &state.locked_speaker_uuid {
+        locked_uuid.clone()
+      } else {
+        "No speaker locked".to_string()
+      }
     })
   }
 }
@@ -86,7 +87,16 @@ impl View for ControlView {
 			}
 			KeyCode::Char(' ') => {
 				if let Some(uuid) = self.list_widget.selected_uuid() {
-					store.dispatch(AppAction::ToggleSelect(uuid.to_owned()));
+					// Check if this speaker is already locked
+					let is_locked = store.with_state(|state| {
+						state.locked_speaker_uuid.as_ref().map(|s| s.as_str()) == Some(uuid)
+					});
+					
+					if is_locked {
+						store.dispatch(AppAction::UnlockSpeaker);
+					} else {
+						store.dispatch(AppAction::LockSpeaker(uuid.to_owned()));
+					}
 				}
 			}
 			_ => {}
