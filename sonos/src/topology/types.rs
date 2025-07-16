@@ -76,6 +76,10 @@ pub struct Topology {
 }
 
 impl Topology {
+    pub fn get_groups(&self) -> &[ZoneGroup] {
+        &self.zone_groups
+    }
+
     /// Returns the total number of zone groups in the topology
     pub fn zone_group_count(&self) -> usize {
         self.zone_groups.len()
@@ -138,6 +142,10 @@ impl Topology {
 }
 
 impl ZoneGroup {
+    pub fn get_speakers(&self) -> &[ZoneGroupMember] {
+        &self.members
+    }
+
     /// Returns true if this zone group has multiple members (is a grouped zone)
     pub fn is_grouped(&self) -> bool {
         self.members.len() > 1
@@ -154,6 +162,34 @@ impl ZoneGroup {
         self.members.iter()
             .map(|member| 1 + member.satellites.len())
             .sum()
+    }
+
+    /// Pauses playback for this zone group by delegating to the coordinator speaker
+    /// 
+    /// # Arguments
+    /// * `system` - Reference to the System containing speaker instances
+    /// 
+    /// # Returns
+    /// * `Ok(())` - If the pause command was successful
+    /// * `Err(SonosError)` - If the coordinator speaker is not found or the command fails
+    pub fn pause(&self, system: &crate::System) -> Result<(), crate::SonosError> {
+        system.get_speaker_by_uuid(&self.coordinator)
+            .ok_or(crate::SonosError::DeviceUnreachable)?
+            .pause()
+    }
+
+    /// Starts playback for this zone group by delegating to the coordinator speaker
+    /// 
+    /// # Arguments
+    /// * `system` - Reference to the System containing speaker instances
+    /// 
+    /// # Returns
+    /// * `Ok(())` - If the play command was successful
+    /// * `Err(SonosError)` - If the coordinator speaker is not found or the command fails
+    pub fn play(&self, system: &crate::System) -> Result<(), crate::SonosError> {
+        system.get_speaker_by_uuid(&self.coordinator)
+            .ok_or(crate::SonosError::DeviceUnreachable)?
+            .play()
     }
 }
 
@@ -500,5 +536,152 @@ mod tests {
         assert_eq!(vanished_devices.devices.len(), 2);
         assert_eq!(vanished_devices.devices[0].uuid, "RINCON_1");
         assert_eq!(vanished_devices.devices[1].uuid, "RINCON_2");
+    }
+
+    #[cfg(feature = "mock")]
+    fn create_mock_system_with_speakers() -> crate::System {
+        use crate::speaker::mock::MockSpeakerBuilder;
+        use crate::speaker::SpeakerTrait;
+        
+        let mut system = crate::System::new().unwrap();
+        
+        // Add mock speakers
+        let speaker1: Box<dyn SpeakerTrait> = Box::new(
+            MockSpeakerBuilder::new()
+                .uuid("RINCON_123")
+                .name("Living Room")
+                .ip("192.168.1.100")
+                .build()
+        );
+        
+        let speaker2: Box<dyn SpeakerTrait> = Box::new(
+            MockSpeakerBuilder::new()
+                .uuid("RINCON_456")
+                .name("Kitchen")
+                .ip("192.168.1.101")
+                .build()
+        );
+        
+        system.add_speaker_for_test(speaker1);
+        system.add_speaker_for_test(speaker2);
+        
+        system
+    }
+
+    #[test]
+    #[cfg(feature = "mock")]
+    fn test_zone_group_pause_command() {
+        let system = create_mock_system_with_speakers();
+        
+        let zone_group = ZoneGroup {
+            coordinator: "RINCON_123".to_string(),
+            id: "RINCON_123:123".to_string(),
+            members: vec![
+                ZoneGroupMember {
+                    uuid: "RINCON_123".to_string(),
+                    location: "http://192.168.1.100:1400/xml/device_description.xml".to_string(),
+                    zone_name: "Living Room".to_string(),
+                    software_version: "56.0-76060".to_string(),
+                    configuration: "1".to_string(),
+                    icon: "x-rincon-roomicon:living".to_string(),
+                    satellites: vec![],
+                }
+            ],
+        };
+        
+        // Test successful pause
+        let result = zone_group.pause(&system);
+        assert!(result.is_ok());
+        
+        // Test pause with non-existent coordinator
+        let invalid_group = ZoneGroup {
+            coordinator: "RINCON_NOTFOUND".to_string(),
+            id: "RINCON_NOTFOUND:123".to_string(),
+            members: vec![],
+        };
+        
+        let result = invalid_group.pause(&system);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), crate::SonosError::DeviceUnreachable));
+    }
+
+    #[test]
+    #[cfg(feature = "mock")]
+    fn test_zone_group_play_command() {
+        let system = create_mock_system_with_speakers();
+        
+        let zone_group = ZoneGroup {
+            coordinator: "RINCON_456".to_string(),
+            id: "RINCON_456:456".to_string(),
+            members: vec![
+                ZoneGroupMember {
+                    uuid: "RINCON_456".to_string(),
+                    location: "http://192.168.1.101:1400/xml/device_description.xml".to_string(),
+                    zone_name: "Kitchen".to_string(),
+                    software_version: "56.0-76060".to_string(),
+                    configuration: "1".to_string(),
+                    icon: "x-rincon-roomicon:kitchen".to_string(),
+                    satellites: vec![],
+                }
+            ],
+        };
+        
+        // Test successful play
+        let result = zone_group.play(&system);
+        assert!(result.is_ok());
+        
+        // Test play with non-existent coordinator
+        let invalid_group = ZoneGroup {
+            coordinator: "RINCON_NOTFOUND".to_string(),
+            id: "RINCON_NOTFOUND:123".to_string(),
+            members: vec![],
+        };
+        
+        let result = invalid_group.play(&system);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), crate::SonosError::DeviceUnreachable));
+    }
+
+    #[test]
+    #[cfg(feature = "mock")]
+    fn test_zone_group_commands_with_grouped_zone() {
+        let system = create_mock_system_with_speakers();
+        
+        // Create a grouped zone with multiple members
+        let grouped_zone = ZoneGroup {
+            coordinator: "RINCON_123".to_string(),
+            id: "RINCON_123:123".to_string(),
+            members: vec![
+                ZoneGroupMember {
+                    uuid: "RINCON_123".to_string(),
+                    location: "http://192.168.1.100:1400/xml/device_description.xml".to_string(),
+                    zone_name: "Living Room".to_string(),
+                    software_version: "56.0-76060".to_string(),
+                    configuration: "1".to_string(),
+                    icon: "x-rincon-roomicon:living".to_string(),
+                    satellites: vec![],
+                },
+                ZoneGroupMember {
+                    uuid: "RINCON_456".to_string(),
+                    location: "http://192.168.1.101:1400/xml/device_description.xml".to_string(),
+                    zone_name: "Kitchen".to_string(),
+                    software_version: "56.0-76060".to_string(),
+                    configuration: "1".to_string(),
+                    icon: "x-rincon-roomicon:kitchen".to_string(),
+                    satellites: vec![],
+                }
+            ],
+        };
+        
+        // Commands should delegate to the coordinator (RINCON_123)
+        let pause_result = grouped_zone.pause(&system);
+        assert!(pause_result.is_ok());
+        
+        let play_result = grouped_zone.play(&system);
+        assert!(play_result.is_ok());
+        
+        // Verify it's using the coordinator, not other members
+        assert_eq!(grouped_zone.coordinator, "RINCON_123");
+        assert!(grouped_zone.is_grouped());
     }
 }

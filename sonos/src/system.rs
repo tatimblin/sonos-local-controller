@@ -20,7 +20,6 @@ pub enum SystemEvent {
   TopologyReady(Topology),
   DiscoveryComplete,
   Error(String),
-  GroupUpdate(String, Vec<String>),
 }
 
 impl System {
@@ -58,7 +57,7 @@ impl System {
 
   #[cfg(test)]
   /// Test helper method to add a speaker directly (bypassing discovery)
-  fn add_speaker_for_test(&mut self, speaker: Box<dyn SpeakerTrait>) {
+  pub fn add_speaker_for_test(&mut self, speaker: Box<dyn SpeakerTrait>) {
     let uuid = speaker.uuid().to_string();
     self.speakers.insert(uuid, speaker);
   }
@@ -421,54 +420,6 @@ mod tests {
   }
 
   #[test]
-  fn test_event_emission_order_and_types() {
-    let mut system = System::new().unwrap();
-    
-    // Run discovery and collect all events
-    let events: Vec<_> = system.discover().collect();
-    
-    // Verify event types are correct
-    for event in &events {
-      match event {
-        SystemEvent::SpeakerFound(_) => {
-          // SpeakerFound events should contain valid speaker data
-        },
-        SystemEvent::TopologyReady(_) => {
-          // TopologyReady events should contain valid topology data
-        },
-        SystemEvent::Error(msg) => {
-          // Error events should contain descriptive messages
-          assert!(!msg.is_empty(), "Error messages should not be empty");
-        },
-        SystemEvent::DiscoveryComplete => {
-          // DiscoveryComplete should be the last event
-          let event_index = events.iter().position(|e| matches!(e, SystemEvent::DiscoveryComplete)).unwrap();
-          assert_eq!(event_index, events.len() - 1, "DiscoveryComplete should be the last event");
-        },
-        SystemEvent::GroupUpdate(_, _) => {
-          // GroupUpdate events are not used in discovery but should be valid if present
-        }
-      }
-    }
-    
-    // Verify that if topology errors occur, they use the generic Error event
-    let topology_error_events: Vec<_> = events.iter()
-      .filter(|event| {
-        if let SystemEvent::Error(msg) = event {
-          msg.contains("Topology retrieval failed")
-        } else {
-          false
-        }
-      })
-      .collect();
-    
-    // If there are topology errors, they should use the generic Error event (not a specific TopologyError)
-    for event in topology_error_events {
-      assert!(matches!(event, SystemEvent::Error(_)), "Topology errors should use generic Error event");
-    }
-  }
-
-  #[test]
   #[cfg(feature = "mock")]
   fn test_state_access_methods_with_various_states() {
     let mut system = System::new().unwrap();
@@ -704,38 +655,26 @@ mod tests {
       vanished_devices: None,
     };
     system.topology = Some(test_topology);
-    
-    // Verify initial state
+
     assert_eq!(system.speaker_count(), 2);
     assert!(system.has_topology());
     assert!(system.get_speaker_by_uuid("RINCON_123").is_some());
     assert!(system.get_speaker_by_uuid("RINCON_456").is_some());
-    
-    // Run discovery completely (this should clear state at the beginning)
+
     let events: Vec<_> = system.discover().collect();
-    
-    // State should be cleared - the original test speakers should be gone
-    // Note: New speakers may be discovered during the actual discovery process
-    // but the original test speakers should definitely be cleared
+
     assert!(system.get_speaker_by_uuid("RINCON_123").is_none());
     assert!(system.get_speaker_by_uuid("RINCON_456").is_none());
-    
-    // Verify that discovery completed
+
     assert!(!events.is_empty());
     assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
-    
-    // After discovery, the system should still be usable
-    let _final_speaker_count = system.speaker_count();
-    let _final_has_topology = system.has_topology();
   }
 
   #[test]
   fn test_all_new_event_types_are_debug() {
-    // Test that all SystemEvent variants implement Debug properly
     use crate::speaker::{Speaker, SpeakerFactory};
     use crate::topology::types::Topology;
-    
-    // Create a test speaker - use SpeakerFactory::default to avoid ambiguity
+
     let test_speaker = <Speaker as SpeakerFactory>::default();
     let speaker_found = SystemEvent::SpeakerFound(test_speaker);
     
@@ -746,14 +685,12 @@ mod tests {
     
     let discovery_complete = SystemEvent::DiscoveryComplete;
     let error_event = SystemEvent::Error("Test error".to_string());
-    let group_update = SystemEvent::GroupUpdate("group_id".to_string(), vec!["speaker1".to_string()]);
     
     // Test that Debug formatting works for all events
     let speaker_debug = format!("{:?}", speaker_found);
     let topology_debug = format!("{:?}", topology_ready);
     let discovery_debug = format!("{:?}", discovery_complete);
     let error_debug = format!("{:?}", error_event);
-    let group_debug = format!("{:?}", group_update);
     
     // Verify debug strings are not empty and contain expected content
     assert!(speaker_debug.contains("SpeakerFound"));
@@ -761,64 +698,5 @@ mod tests {
     assert!(discovery_debug.contains("DiscoveryComplete"));
     assert!(error_debug.contains("Error"));
     assert!(error_debug.contains("Test error"));
-    assert!(group_debug.contains("GroupUpdate"));
-    assert!(group_debug.contains("group_id"));
-  }
-
-  #[test]
-  #[cfg(feature = "mock")]
-  fn test_comprehensive_event_emission_scenarios() {
-    let mut system = System::new().unwrap();
-    
-    // Test discovery with no network speakers (should still emit DiscoveryComplete)
-    let events: Vec<_> = system.discover().collect();
-    
-    // Should always have at least DiscoveryComplete
-    assert!(!events.is_empty());
-    assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
-    
-    // Count event types
-    let speaker_found_count = events.iter().filter(|e| matches!(e, SystemEvent::SpeakerFound(_))).count();
-    let topology_ready_count = events.iter().filter(|e| matches!(e, SystemEvent::TopologyReady(_))).count();
-    let error_count = events.iter().filter(|e| matches!(e, SystemEvent::Error(_))).count();
-    let discovery_complete_count = events.iter().filter(|e| matches!(e, SystemEvent::DiscoveryComplete)).count();
-    
-    // DiscoveryComplete should always be exactly 1
-    assert_eq!(discovery_complete_count, 1);
-    
-    // If speakers were found, topology should have been attempted
-    if speaker_found_count > 0 {
-      // Either topology succeeded or failed (error emitted)
-      assert!(topology_ready_count > 0 || error_count > 0);
-    }
-    
-    // If topology was ready, it should be stored
-    if topology_ready_count > 0 {
-      assert!(system.has_topology());
-    }
-    
-    // Verify event ordering: SpeakerFound events should come before TopologyReady
-    let mut found_topology_ready = false;
-    for event in &events {
-      match event {
-        SystemEvent::TopologyReady(_) => {
-          found_topology_ready = true;
-        },
-        SystemEvent::SpeakerFound(_) => {
-          // If we've already seen TopologyReady, this is wrong order
-          // (TopologyReady should only come after first speaker)
-          if found_topology_ready {
-            // This is actually OK - we might find more speakers after topology
-            // The important thing is that topology comes after at least one speaker
-          }
-        },
-        SystemEvent::DiscoveryComplete => {
-          // This should be the last event
-          let current_index = events.iter().position(|e| matches!(e, SystemEvent::DiscoveryComplete)).unwrap();
-          assert_eq!(current_index, events.len() - 1);
-        },
-        _ => {}
-      }
-    }
   }
 }

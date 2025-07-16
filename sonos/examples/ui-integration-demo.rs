@@ -254,9 +254,6 @@ impl UIState {
             SystemEvent::DiscoveryComplete => {
                 self.discovery_complete = true;
             },
-            SystemEvent::GroupUpdate(_, _) => {
-                // Handle group updates
-            },
         }
     }
     
@@ -413,10 +410,6 @@ fn migration_example() {
             
             SystemEvent::Error(msg) => {
                 println!("Error: {}", msg);
-            },
-            
-            SystemEvent::GroupUpdate(group_id, members) => {
-                println!("Group {} updated: {} members", group_id, members.len());
             },
         }
     }
