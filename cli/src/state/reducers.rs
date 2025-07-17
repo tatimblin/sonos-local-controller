@@ -12,8 +12,7 @@ pub enum AppAction {
     SetTopology(TopologyList),
     SetSystem(Arc<System>),
     SetActiveSpeaker(String),
-    LockSpeaker(String),
-    UnlockSpeaker,
+    ToggleSpeakerLock(String),
     ClearActiveSelection,
     ClearSelection,
 }
@@ -35,8 +34,9 @@ impl std::fmt::Debug for AppAction {
             AppAction::SetActiveSpeaker(uuid) => {
                 f.debug_tuple("SetActiveSpeaker").field(uuid).finish()
             }
-            AppAction::LockSpeaker(uuid) => f.debug_tuple("LockSpeaker").field(uuid).finish(),
-            AppAction::UnlockSpeaker => f.debug_tuple("UnlockSpeaker").finish(),
+            AppAction::ToggleSpeakerLock(uuid) => {
+                f.debug_tuple("ToggleSpeakerLock").field(uuid).finish()
+            }
             AppAction::ClearActiveSelection => f.debug_tuple("ClearActiveSelection").finish(),
             AppAction::ClearSelection => f.debug_tuple("ClearSelection").finish(),
         }
@@ -52,9 +52,6 @@ pub fn app_reducer(state: &mut AppState, action: AppAction) {
         }
         AppAction::SetTopology(topology) => {
             log::debug!("SetTopology action received, switching to Control view");
-
-            // TODO (ttimblin): check if should clear selected
-
             state.topology = Some(topology);
             state.view = ViewType::Control;
         }
@@ -66,13 +63,20 @@ pub fn app_reducer(state: &mut AppState, action: AppAction) {
             log::debug!("SetActiveSpeaker action received: {}", uuid);
             state.active_speaker_uuid = Some(uuid);
         }
-        AppAction::LockSpeaker(uuid) => {
-            log::debug!("LockSpeaker action received: {}", uuid);
-            state.locked_speaker_uuid = Some(uuid);
-        }
-        AppAction::UnlockSpeaker => {
-            log::debug!("UnlockSpeaker action received");
-            state.locked_speaker_uuid = None;
+        AppAction::ToggleSpeakerLock(uuid) => {
+            log::debug!("ToggleSpeakerLock action received: {}", uuid);
+
+            // Toggle the lock state - if currently locked to this speaker, unlock it
+            // If locked to a different speaker or not locked, lock to this speaker
+            let is_currently_locked =
+                state.locked_speaker_uuid.as_ref().map(|s| s.as_str()) == Some(&uuid);
+
+            if is_currently_locked {
+                state.locked_speaker_uuid = None;
+            } else {
+                // Ensure single selection constraint - automatically unlock any previously locked speaker
+                state.locked_speaker_uuid = Some(uuid);
+            }
         }
         AppAction::ClearActiveSelection => {
             log::debug!("ClearActiveSelection action received");
@@ -84,5 +88,130 @@ pub fn app_reducer(state: &mut AppState, action: AppAction) {
             state.active_speaker_uuid = None;
             state.locked_speaker_uuid = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::topology::{topology_item::TopologyItem, topology_list::TopologyList};
+
+    fn create_test_topology_with_speakers() -> TopologyList {
+        TopologyList {
+            items: vec![
+                TopologyItem::Speaker {
+                    uuid: "speaker1".to_string(),
+                },
+                TopologyItem::Speaker {
+                    uuid: "speaker2".to_string(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn test_set_active_speaker_with_valid_uuid() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+
+        app_reducer(
+            &mut state,
+            AppAction::SetActiveSpeaker("speaker1".to_string()),
+        );
+
+        assert_eq!(state.active_speaker_uuid, Some("speaker1".to_string()));
+    }
+
+    #[test]
+    fn test_set_active_speaker_always_sets_uuid() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+
+        app_reducer(
+            &mut state,
+            AppAction::SetActiveSpeaker("any_speaker".to_string()),
+        );
+
+        assert_eq!(state.active_speaker_uuid, Some("any_speaker".to_string()));
+    }
+
+    #[test]
+    fn test_toggle_speaker_lock_with_valid_uuid() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+
+        // Lock speaker1
+        app_reducer(
+            &mut state,
+            AppAction::ToggleSpeakerLock("speaker1".to_string()),
+        );
+        assert_eq!(state.locked_speaker_uuid, Some("speaker1".to_string()));
+
+        // Unlock speaker1
+        app_reducer(
+            &mut state,
+            AppAction::ToggleSpeakerLock("speaker1".to_string()),
+        );
+        assert_eq!(state.locked_speaker_uuid, None);
+    }
+
+    #[test]
+    fn test_toggle_speaker_lock_always_works() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+
+        app_reducer(
+            &mut state,
+            AppAction::ToggleSpeakerLock("any_speaker".to_string()),
+        );
+
+        assert_eq!(state.locked_speaker_uuid, Some("any_speaker".to_string()));
+    }
+
+    #[test]
+    fn test_single_selection_constraint() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+
+        // Lock first speaker
+        app_reducer(
+            &mut state,
+            AppAction::ToggleSpeakerLock("speaker1".to_string()),
+        );
+        assert_eq!(state.locked_speaker_uuid, Some("speaker1".to_string()));
+
+        // Lock second speaker - should replace the first
+        app_reducer(
+            &mut state,
+            AppAction::ToggleSpeakerLock("speaker2".to_string()),
+        );
+        assert_eq!(state.locked_speaker_uuid, Some("speaker2".to_string()));
+    }
+
+    #[test]
+    fn test_clear_active_selection() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+        state.active_speaker_uuid = Some("speaker1".to_string());
+        state.locked_speaker_uuid = Some("speaker2".to_string());
+
+        app_reducer(&mut state, AppAction::ClearActiveSelection);
+
+        assert_eq!(state.active_speaker_uuid, None);
+        assert_eq!(state.locked_speaker_uuid, None);
+    }
+
+    #[test]
+    fn test_set_topology_preserves_selections() {
+        let mut state = AppState::default();
+        state.active_speaker_uuid = Some("speaker1".to_string());
+        state.locked_speaker_uuid = Some("speaker2".to_string());
+
+        let new_topology = create_test_topology_with_speakers();
+        app_reducer(&mut state, AppAction::SetTopology(new_topology));
+
+        // Selections are preserved since we removed validation
+        assert_eq!(state.active_speaker_uuid, Some("speaker1".to_string()));
+        assert_eq!(state.locked_speaker_uuid, Some("speaker2".to_string()));
     }
 }
