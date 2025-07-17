@@ -15,82 +15,96 @@ use crate::widgets::speaker_list::SpeakerList;
 use super::View;
 
 pub struct ControlView {
-	store: Arc<Store>,
-  list_widget: SpeakerList,
+    store: Arc<Store>,
+    list_widget: SpeakerList,
 }
 
 impl ControlView {
-	pub fn new(store: Arc<Store>) -> Self {
-		let list_widget = store.with_state(|state| {
-			if let Some(topology) = &state.topology {
-				// Create topology list from actual topology data
-				SpeakerList::new_with(
-					topology,
-					|item| {
-						match item {
-							TopologyItem::Group { uuid, name } => (format!("Group: {name}"), uuid.clone()),
-							TopologyItem::Speaker { uuid } => (format!("  Speaker: {uuid}"), uuid.clone()),
-							TopologyItem::Satellite { uuid } => (format!("  Satellite: {uuid}"), uuid.clone()),
-						}
-					}
-				)
-			} else {
-				// Create empty topology list for empty state
-				let empty_topology = TopologyList { items: vec!() };
-				SpeakerList::new(&empty_topology)
-			}
-		});
+    pub fn new(store: Arc<Store>) -> Self {
+        let list_widget = store.with_state(|state| {
+            if let Some(topology) = &state.topology {
+                // Create topology list from actual topology data
+                SpeakerList::new_with(topology, |item| match item {
+                    TopologyItem::Group { uuid, name } => (format!("Group: {name}"), uuid.clone()),
+                    TopologyItem::Speaker { uuid } => (format!("  Speaker: {uuid}"), uuid.clone()),
+                    TopologyItem::Satellite { uuid } => {
+                        (format!("  Satellite: {uuid}"), uuid.clone())
+                    }
+                })
+            } else {
+                // Create empty topology list for empty state
+                let empty_topology = TopologyList { items: vec![] };
+                SpeakerList::new(&empty_topology)
+            }
+        });
 
-		Self { store, list_widget }
-	}
+        Self { store, list_widget }
+    }
 
-	fn get_selected_list(&self) -> String {
-    self.store.with_state(|state| {
-      state.selected_speaker_uuids
-				.iter()
-				.map(|x| x.to_string() + ",")
-				.collect::<String>()
-    })
-  }
+    fn get_selected_list(&self) -> String {
+        self.store.with_state(|state| {
+            if let Some(locked_uuid) = &state.locked_speaker_uuid {
+                locked_uuid.clone()
+            } else {
+                "No speaker locked".to_string()
+            }
+        })
+    }
 }
 
 impl View for ControlView {
-	fn render(&mut self, frame: &mut Frame) {
-		let chunks = Layout::default()
-			.direction(Direction::Vertical)
-			.constraints([
-					Constraint::Length(1),
-					Constraint::Min(0),
-			])
-			.split(frame.area());
-		let body = Text::from(self.get_selected_list());
-		let body_paragraph = Paragraph::new(body).alignment(Alignment::Center);
-    frame.render_widget(body_paragraph, chunks[0]);
+    fn render(&mut self, frame: &mut Frame) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(frame.area());
+        let body = Text::from(self.get_selected_list());
+        let body_paragraph = Paragraph::new(body).alignment(Alignment::Center);
+        frame.render_widget(body_paragraph, chunks[0]);
 
-		self.list_widget.draw(frame, chunks[1]);
-	}
+        self.store.with_state(|state| {
+            self.list_widget.draw(frame, chunks[1], state);
+        });
+    }
 
-	fn handle_input(&mut self, key_event: KeyEvent, store: &Store) -> io::Result<()> {
-		match key_event.code {
-			KeyCode::Up => {
-				self.list_widget.previous();
-			}
-			KeyCode::Down => {
-				self.list_widget.next();
-			}
-			KeyCode::Left => {
-				store.dispatch(AppAction::AdjustVolume(-4));
-			}
-			KeyCode::Right => {
-				store.dispatch(AppAction::AdjustVolume(4));
-			}
-			KeyCode::Char(' ') => {
-				if let Some(uuid) = self.list_widget.selected_uuid() {
-					store.dispatch(AppAction::ToggleSelect(uuid.to_owned()));
-				}
-			}
-			_ => {}
-		}
-		Ok(())
-	}
+    fn handle_input(&mut self, key_event: KeyEvent, store: &Store) -> io::Result<()> {
+        match key_event.code {
+            KeyCode::Up => {
+                self.list_widget.previous();
+                // If we navigated to a speaker, set it as active
+                if let Some(selected_item) = self.list_widget.selected() {
+                    if let TopologyItem::Speaker { uuid } = selected_item {
+                        store.dispatch(AppAction::SetActiveSpeaker(uuid.clone()));
+                    }
+                }
+            }
+            KeyCode::Down => {
+                self.list_widget.next();
+                // If we navigated to a speaker, set it as active
+                if let Some(selected_item) = self.list_widget.selected() {
+                    if let TopologyItem::Speaker { uuid } = selected_item {
+                        store.dispatch(AppAction::SetActiveSpeaker(uuid.clone()));
+                    }
+                }
+            }
+            KeyCode::Left => {
+                store.dispatch(AppAction::AdjustVolume(-4));
+            }
+            KeyCode::Right => {
+                store.dispatch(AppAction::AdjustVolume(4));
+            }
+            KeyCode::Char(' ') => {
+                // Toggle lock for the currently highlighted item if it's a speaker
+                if let Some(selected_item) = self.list_widget.selected() {
+                    if let TopologyItem::Speaker { uuid } = selected_item {
+                        store.dispatch(AppAction::ToggleSpeakerLock(uuid.clone()));
+                    }
+                }
+            }
+            _ => {
+                // Let unhandled keys (like 'q') pass through to the main app
+            }
+        }
+        Ok(())
+    }
 }

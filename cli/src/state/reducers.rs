@@ -11,7 +11,9 @@ pub enum AppAction {
     SetStatusMessage(String),
     SetTopology(TopologyList),
     SetSystem(Arc<System>),
-    ToggleSelect(String),
+    SetActiveSpeaker(String),
+    ToggleSpeakerLock(String),
+    ClearActiveSelection,
     ClearSelection,
 }
 
@@ -29,9 +31,13 @@ impl std::fmt::Debug for AppAction {
                 f.debug_tuple("SetTopology").field(topology).finish()
             }
             AppAction::SetSystem(_) => f.debug_tuple("SetSystem").field(&"Arc<System>").finish(),
-            AppAction::ToggleSelect(uuid) => {
-                f.debug_tuple("Select").field(uuid).finish()
+            AppAction::SetActiveSpeaker(uuid) => {
+                f.debug_tuple("SetActiveSpeaker").field(uuid).finish()
             }
+            AppAction::ToggleSpeakerLock(uuid) => {
+                f.debug_tuple("ToggleSpeakerLock").field(uuid).finish()
+            }
+            AppAction::ClearActiveSelection => f.debug_tuple("ClearActiveSelection").finish(),
             AppAction::ClearSelection => f.debug_tuple("ClearSelection").finish(),
         }
     }
@@ -46,9 +52,6 @@ pub fn app_reducer(state: &mut AppState, action: AppAction) {
         }
         AppAction::SetTopology(topology) => {
             log::debug!("SetTopology action received, switching to Control view");
-
-            // TODO (ttimblin): check if should clear selected
-
             state.topology = Some(topology);
             state.view = ViewType::Control;
         }
@@ -56,530 +59,159 @@ pub fn app_reducer(state: &mut AppState, action: AppAction) {
             log::debug!("SetSystem action received");
             state.system = Some(system);
         }
-        AppAction::ToggleSelect(uuid) => {
-            log::debug!("Select action received: {}", uuid);
-            if let Some(pos) = state.selected_speaker_uuids.iter().position(|u| *u == uuid) {
-                state.selected_speaker_uuids.remove(pos);
+        AppAction::SetActiveSpeaker(uuid) => {
+            log::debug!("SetActiveSpeaker action received: {}", uuid);
+            state.active_speaker_uuid = Some(uuid);
+        }
+        AppAction::ToggleSpeakerLock(uuid) => {
+            log::debug!("ToggleSpeakerLock action received: {}", uuid);
+
+            // Toggle the lock state - if currently locked to this speaker, unlock it
+            // If locked to a different speaker or not locked, lock to this speaker
+            let is_currently_locked =
+                state.locked_speaker_uuid.as_ref().map(|s| s.as_str()) == Some(&uuid);
+
+            if is_currently_locked {
+                state.locked_speaker_uuid = None;
             } else {
-                state.selected_speaker_uuids.push(uuid);
+                // Ensure single selection constraint - automatically unlock any previously locked speaker
+                state.locked_speaker_uuid = Some(uuid);
             }
+        }
+        AppAction::ClearActiveSelection => {
+            log::debug!("ClearActiveSelection action received");
+            state.active_speaker_uuid = None;
+            state.locked_speaker_uuid = None;
         }
         AppAction::ClearSelection => {
             log::debug!("ClearSelection action received");
-            state.selected_speaker_uuids = vec![];
+            state.active_speaker_uuid = None;
+            state.locked_speaker_uuid = None;
         }
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::types::{Group, SpeakerInfo, View};
-
-//     fn create_test_topology() -> Topology {
-//         Topology {
-//             groups: vec![
-//                 Group {
-//                     name: "Living Room".to_string(),
-//                     speakers: vec![SpeakerInfo::from_name("Living Room", true)],
-//                 },
-//                 Group {
-//                     name: "Kitchen".to_string(),
-//                     speakers: vec![
-//                         SpeakerInfo::from_name("Kitchen", true),
-//                         SpeakerInfo::from_name("Dining Room", false),
-//                     ],
-//                 },
-//             ],
-//         }
-//     }
-
-//     fn create_updated_topology() -> Topology {
-//         Topology {
-//             groups: vec![
-//                 Group {
-//                     name: "Bedroom".to_string(),
-//                     speakers: vec![SpeakerInfo::from_name("Bedroom", true)],
-//                 },
-//                 Group {
-//                     name: "Office".to_string(),
-//                     speakers: vec![SpeakerInfo::from_name("Office", true)],
-//                 },
-//                 Group {
-//                     name: "Bathroom".to_string(),
-//                     speakers: vec![SpeakerInfo::from_name("Bathroom", true)],
-//                 },
-//             ],
-//         }
-//     }
-
-//     #[test]
-//     fn test_set_topology_action_updates_state_correctly() {
-//         let mut state = AppState::default();
-//         let topology = create_test_topology();
-
-//         // Verify initial state has no topology
-//         assert!(state.topology.is_none());
-
-//         // Dispatch SetTopology action
-//         app_reducer(&mut state, AppAction::SetTopology(topology.clone()));
-
-//         // Verify topology is now set in state
-//         assert!(state.topology.is_some());
-//         let stored_topology = state.topology.as_ref().unwrap();
-
-//         // Verify topology data is correct
-//         assert_eq!(stored_topology.groups.len(), 2);
-//         assert_eq!(stored_topology.groups[0].name, "Living Room");
-//         assert_eq!(stored_topology.groups[0].speakers.len(), 1);
-//         assert_eq!(stored_topology.groups[0].speakers[0], "Living Room");
-
-//         assert_eq!(stored_topology.groups[1].name, "Kitchen");
-//         assert_eq!(stored_topology.groups[1].speakers.len(), 2);
-//         assert_eq!(stored_topology.groups[1].speakers[0], "Kitchen");
-//         assert_eq!(stored_topology.groups[1].speakers[1], "Dining Room");
-//     }
-
-//     #[test]
-//     fn test_multiple_topology_updates_replace_previous_data() {
-//         let mut state = AppState::default();
-//         let first_topology = create_test_topology();
-//         let second_topology = create_updated_topology();
-
-//         // Set initial topology
-//         app_reducer(&mut state, AppAction::SetTopology(first_topology));
-
-//         // Verify first topology is set
-//         assert!(state.topology.is_some());
-//         let stored_topology = state.topology.as_ref().unwrap();
-//         assert_eq!(stored_topology.groups.len(), 2);
-//         assert_eq!(stored_topology.groups[0].name, "Living Room");
-//         assert_eq!(stored_topology.groups[1].name, "Kitchen");
-
-//         // Update with second topology
-//         app_reducer(&mut state, AppAction::SetTopology(second_topology));
-
-//         // Verify second topology replaced the first
-//         assert!(state.topology.is_some());
-//         let updated_topology = state.topology.as_ref().unwrap();
-//         assert_eq!(updated_topology.groups.len(), 3);
-//         assert_eq!(updated_topology.groups[0].name, "Bedroom");
-//         assert_eq!(updated_topology.groups[1].name, "Office");
-//         assert_eq!(updated_topology.groups[2].name, "Bathroom");
-
-//         // Verify old topology data is completely replaced
-//         assert!(!updated_topology
-//             .groups
-//             .iter()
-//             .any(|g| g.name == "Living Room"));
-//         assert!(!updated_topology.groups.iter().any(|g| g.name == "Kitchen"));
-//     }
-
-//     #[test]
-//     fn test_initial_state_handling_with_no_topology() {
-//         let state = AppState::default();
-
-//         // Verify initial state has no topology
-//         assert!(state.topology.is_none());
-
-//         // Verify other state fields are properly initialized
-//         assert!(matches!(state.view, View::Startup));
-//         assert_eq!(state.status_message, "loading...");
-//     }
-
-//     #[test]
-//     fn test_set_topology_preserves_other_state_fields() {
-//         let mut state = AppState {
-//             view: View::Control,
-//             status_message: "Custom message".to_string(),
-//             topology: None,
-//             system: None,
-//             selected_speaker_uuid: None,
-//         };
-
-//         let topology = create_test_topology();
-
-//         // Dispatch SetTopology action
-//         app_reducer(&mut state, AppAction::SetTopology(topology));
-
-//         // Verify topology is set
-//         assert!(state.topology.is_some());
-
-//         // Verify other state fields are preserved
-//         assert!(matches!(state.view, View::Control));
-//         assert_eq!(state.status_message, "Custom message");
-//     }
-
-//     #[test]
-//     fn test_set_topology_with_empty_groups() {
-//         let mut state = AppState::default();
-//         let empty_topology = Topology { groups: vec![] };
-
-//         // Dispatch SetTopology action with empty topology
-//         app_reducer(&mut state, AppAction::SetTopology(empty_topology));
-
-//         // Verify topology is set but empty
-//         assert!(state.topology.is_some());
-//         let stored_topology = state.topology.as_ref().unwrap();
-//         assert_eq!(stored_topology.groups.len(), 0);
-//     }
-
-//     #[test]
-//     fn test_set_topology_with_single_group() {
-//         let mut state = AppState::default();
-//         let single_group_topology = Topology {
-//             groups: vec![Group {
-//                 name: "Solo Speaker".to_string(),
-//                 speakers: vec![SpeakerInfo::from_name("Solo Speaker", true)],
-//             }],
-//         };
-
-//         // Dispatch SetTopology action
-//         app_reducer(&mut state, AppAction::SetTopology(single_group_topology));
-
-//         // Verify topology is set correctly
-//         assert!(state.topology.is_some());
-//         let stored_topology = state.topology.as_ref().unwrap();
-//         assert_eq!(stored_topology.groups.len(), 1);
-//         assert_eq!(stored_topology.groups[0].name, "Solo Speaker");
-//         assert_eq!(stored_topology.groups[0].speakers.len(), 1);
-//         assert_eq!(stored_topology.groups[0].speakers[0], "Solo Speaker");
-//     }
-
-//     #[test]
-//     fn test_set_topology_action_is_debug_printable() {
-//         let topology = create_test_topology();
-//         let action = AppAction::SetTopology(topology);
-
-//         // This should not panic - verifies Debug trait is implemented
-//         let debug_string = format!("{:?}", action);
-//         assert!(debug_string.contains("SetTopology"));
-//     }
-
-//     #[test]
-//     fn test_set_system_action_updates_state_correctly() {
-//         let mut state = AppState::default();
-//         let system = Arc::new(System::new().unwrap());
-
-//         // Verify initial state has no system
-//         assert!(state.system.is_none());
-
-//         // Dispatch SetSystem action
-//         app_reducer(&mut state, AppAction::SetSystem(system.clone()));
-
-//         // Verify system is now set in state
-//         assert!(state.system.is_some());
-
-//         // Verify it's the same Arc reference
-//         let stored_system = state.system.as_ref().unwrap();
-//         assert!(Arc::ptr_eq(&system, stored_system));
-//     }
-
-//     #[test]
-//     fn test_multiple_system_updates_replace_previous_reference() {
-//         let mut state = AppState::default();
-//         let first_system = Arc::new(System::new().unwrap());
-//         let second_system = Arc::new(System::new().unwrap());
-
-//         // Set initial system
-//         app_reducer(&mut state, AppAction::SetSystem(first_system.clone()));
-
-//         // Verify first system is set
-//         assert!(state.system.is_some());
-//         let stored_system = state.system.as_ref().unwrap();
-//         assert!(Arc::ptr_eq(&first_system, stored_system));
-
-//         // Update with second system
-//         app_reducer(&mut state, AppAction::SetSystem(second_system.clone()));
-
-//         // Verify second system replaced the first
-//         assert!(state.system.is_some());
-//         let updated_system = state.system.as_ref().unwrap();
-//         assert!(Arc::ptr_eq(&second_system, updated_system));
-//         assert!(!Arc::ptr_eq(&first_system, updated_system));
-//     }
-
-//     #[test]
-//     fn test_set_system_preserves_other_state_fields() {
-//         let mut state = AppState {
-//             view: View::Control,
-//             status_message: "Custom message".to_string(),
-//             topology: Some(create_test_topology()),
-//             system: None,
-//             selected_speaker_uuid: None,
-//         };
-
-//         let system = Arc::new(System::new().unwrap());
-
-//         // Dispatch SetSystem action
-//         app_reducer(&mut state, AppAction::SetSystem(system.clone()));
-
-//         // Verify system is set
-//         assert!(state.system.is_some());
-//         let stored_system = state.system.as_ref().unwrap();
-//         assert!(Arc::ptr_eq(&system, stored_system));
-
-//         // Verify other state fields are preserved
-//         assert!(matches!(state.view, View::Control));
-//         assert_eq!(state.status_message, "Custom message");
-//         assert!(state.topology.is_some());
-//     }
-
-//     #[test]
-//     fn test_initial_state_has_no_system_reference() {
-//         let state = AppState::default();
-
-//         // Verify initial state has no system
-//         assert!(state.system.is_none());
-
-//         // Verify other state fields are properly initialized
-//         assert!(matches!(state.view, View::Startup));
-//         assert_eq!(state.status_message, "loading...");
-//         assert!(state.topology.is_none());
-//     }
-
-//     #[test]
-//     fn test_set_system_action_is_debug_printable() {
-//         let system = Arc::new(System::new().unwrap());
-//         let action = AppAction::SetSystem(system);
-
-//         // This should not panic - verifies Debug trait is implemented
-//         let debug_string = format!("{:?}", action);
-//         assert!(debug_string.contains("SetSystem"));
-//     }
-
-//     #[test]
-//     fn test_system_reference_sharing_with_arc() {
-//         let mut state = AppState::default();
-//         let system = Arc::new(System::new().unwrap());
-
-//         // Create multiple references to the same system
-//         let system_ref1 = system.clone();
-//         let system_ref2 = system.clone();
-
-//         // Set system in state
-//         app_reducer(&mut state, AppAction::SetSystem(system_ref1));
-
-//         // Verify all references point to the same system
-//         let stored_system = state.system.as_ref().unwrap();
-//         assert!(Arc::ptr_eq(&system, stored_system));
-//         assert!(Arc::ptr_eq(&system_ref2, stored_system));
-
-//         // Verify reference count is correct (original + state + ref2 = 3)
-//         assert_eq!(Arc::strong_count(stored_system), 3);
-//     }
-
-//     #[test]
-//     fn test_system_reference_cleanup_on_replacement() {
-//         let mut state = AppState::default();
-//         let first_system = Arc::new(System::new().unwrap());
-//         let second_system = Arc::new(System::new().unwrap());
-
-//         // Keep a reference to first system to test cleanup
-//         let first_system_ref = first_system.clone();
-
-//         // Set first system
-//         app_reducer(&mut state, AppAction::SetSystem(first_system));
-
-//         // Verify reference count (original ref + state = 2)
-//         assert_eq!(Arc::strong_count(&first_system_ref), 2);
-
-//         // Replace with second system
-//         app_reducer(&mut state, AppAction::SetSystem(second_system.clone()));
-
-//         // Verify first system reference count decreased (only original ref remains)
-//         assert_eq!(Arc::strong_count(&first_system_ref), 1);
-
-//         // Verify second system reference count (original + state = 2)
-//         assert_eq!(Arc::strong_count(&second_system), 2);
-//     }
-
-//     #[test]
-//     fn test_topology_update_preserves_valid_selection() {
-//         let mut state = AppState::default();
-//         let speaker_uuid = "RINCON_000E58FE3AEA01400".to_string();
-
-//         app_reducer(
-//             &mut state,
-//             AppAction::SetSelectedSpeakerUuid(speaker_uuid.clone()),
-//         );
-
-//         // Create topology that includes the selected speaker
-//         let topology = Topology {
-//             groups: vec![Group {
-//                 name: "Living Room".to_string(),
-//                 speakers: vec![SpeakerInfo {
-//                     name: "Living Room".to_string(),
-//                     uuid: "RINCON_000E58FE3AEA01400".to_string(),
-//                     ip: "192.168.1.100".to_string(),
-//                     is_coordinator: true,
-//                 }],
-//             }],
-//         };
-
-//         // Update topology
-//         app_reducer(&mut state, AppAction::SetTopology(topology));
-
-//         assert_eq!(state.selected_speaker_uuid.as_ref().unwrap(), &speaker_uuid);
-//     }
-
-//     // add this test back when feature is implemented
-//     #[ignore]
-//     #[test]
-//     fn test_topology_update_clears_invalid_speaker_selection() {
-//         let mut state = AppState::default();
-//         let speaker_uuid = "RINCON_NONEXISTENT".to_string();
-
-//         // Set selections for speakers that won't exist in new topology
-//         app_reducer(&mut state, AppAction::SetSelectedSpeakerUuid(speaker_uuid));
-
-//         // Create topology without the selected speaker
-//         let topology = Topology {
-//             groups: vec![Group {
-//                 name: "Living Room".to_string(),
-//                 speakers: vec![SpeakerInfo {
-//                     name: "Living Room".to_string(),
-//                     uuid: "RINCON_000E58FE3AEA01400".to_string(),
-//                     ip: "192.168.1.100".to_string(),
-//                     is_coordinator: true,
-//                 }],
-//             }],
-//         };
-
-//         // Update topology
-//         app_reducer(&mut state, AppAction::SetTopology(topology));
-
-//         assert!(state.selected_speaker_uuid.is_none());
-//     }
-
-//     // add this test back when feature is implemented
-//     #[ignore]
-//     #[test]
-//     fn test_topology_update_clears_invalid_group_selection() {
-//         let mut state = AppState::default();
-//         let speaker_uuid = "RINCON_000E58FE3AEA01400".to_string();
-
-//         // Set selections
-//         app_reducer(&mut state, AppAction::SetSelectedSpeakerUuid(speaker_uuid));
-
-//         // Create topology where the speaker exists but is no longer a coordinator
-//         let topology = Topology {
-//             groups: vec![Group {
-//                 name: "Living Room".to_string(),
-//                 speakers: vec![
-//                     SpeakerInfo {
-//                         name: "Living Room".to_string(),
-//                         uuid: "RINCON_000E58FE3AEA01400".to_string(),
-//                         ip: "192.168.1.100".to_string(),
-//                         is_coordinator: false, // No longer coordinator
-//                     },
-//                     SpeakerInfo {
-//                         name: "Kitchen".to_string(),
-//                         uuid: "RINCON_000E58FE3AEA01401".to_string(),
-//                         ip: "192.168.1.101".to_string(),
-//                         is_coordinator: true, // New coordinator
-//                     },
-//                 ],
-//             }],
-//         };
-
-//         // Update topology
-//         app_reducer(&mut state, AppAction::SetTopology(topology));
-
-//         assert!(state.selected_speaker_uuid.is_none());
-//     }
-
-//     #[test]
-//     fn test_selection_state_initialization() {
-//         let state = AppState::default();
-
-//         // Verify initial selection state is None
-//         assert!(state.selected_speaker_uuid.is_none());
-//     }
-
-//     #[test]
-//     fn test_set_selected_speaker_uuid_action() {
-//         let mut state = AppState::default();
-//         let speaker_uuid = "RINCON_TEST_SPEAKER_UUID".to_string();
-
-//         // Verify initial state has no selected speaker
-//         assert!(state.selected_speaker_uuid.is_none());
-
-//         // Dispatch SetSelectedSpeakerUuid action
-//         app_reducer(
-//             &mut state,
-//             AppAction::SetSelectedSpeakerUuid(speaker_uuid.clone()),
-//         );
-
-//         // Verify speaker UUID is now set in state
-//         assert!(state.selected_speaker_uuid.is_some());
-//         assert_eq!(state.selected_speaker_uuid.unwrap(), speaker_uuid);
-//     }
-
-//     #[test]
-//     fn test_clear_selection_action() {
-//         let mut state = AppState::default();
-//         let speaker_uuid = "RINCON_TEST_SPEAKER_UUID".to_string();
-
-//         // Set both speaker and group selections
-//         app_reducer(&mut state, AppAction::SetSelectedSpeakerUuid(speaker_uuid));
-
-//         assert!(state.selected_speaker_uuid.is_some());
-
-//         // Dispatch ClearSelection action
-//         app_reducer(&mut state, AppAction::ClearSelection);
-
-//         assert!(state.selected_speaker_uuid.is_none());
-//     }
-
-//     #[test]
-//     fn test_selection_actions_preserve_other_state_fields() {
-//         let mut state = AppState {
-//             view: View::Control,
-//             status_message: "Custom message".to_string(),
-//             topology: Some(create_test_topology()),
-//             system: Some(Arc::new(System::new().unwrap())),
-//             selected_speaker_uuid: None,
-//         };
-
-//         let speaker_uuid = "RINCON_TEST_SPEAKER".to_string();
-
-//         // Set speaker selection
-//         app_reducer(
-//             &mut state,
-//             AppAction::SetSelectedSpeakerUuid(speaker_uuid.clone()),
-//         );
-
-//         // Verify selection is set and other fields are preserved
-//         assert_eq!(state.selected_speaker_uuid.as_ref().unwrap(), &speaker_uuid);
-//         assert!(matches!(state.view, View::Control));
-//         assert_eq!(state.status_message, "Custom message");
-//         assert!(state.topology.is_some());
-//         assert!(state.system.is_some());
-
-//         // Clear selections
-//         app_reducer(&mut state, AppAction::ClearSelection);
-
-//         // Verify selections are cleared and other fields are preserved
-//         assert!(state.selected_speaker_uuid.is_none());
-//         assert!(matches!(state.view, View::Control));
-//         assert_eq!(state.status_message, "Custom message");
-//         assert!(state.topology.is_some());
-//         assert!(state.system.is_some());
-//     }
-
-//     #[test]
-//     fn test_selection_actions_are_debug_printable() {
-//         let speaker_uuid = "RINCON_TEST_SPEAKER".to_string();
-
-//         // Test SetSelectedSpeakerUuid action debug
-//         let speaker_action = AppAction::SetSelectedSpeakerUuid(speaker_uuid);
-//         let debug_string = format!("{:?}", speaker_action);
-//         assert!(debug_string.contains("SetSelectedSpeakerUuid"));
-
-//         // Test ClearSelection action debug
-//         let clear_action = AppAction::ClearSelection;
-//         let debug_string = format!("{:?}", clear_action);
-//         assert!(debug_string.contains("ClearSelection"));
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::topology::{topology_item::TopologyItem, topology_list::TopologyList};
+
+    fn create_test_topology_with_speakers() -> TopologyList {
+        TopologyList {
+            items: vec![
+                TopologyItem::Speaker {
+                    uuid: "speaker1".to_string(),
+                },
+                TopologyItem::Speaker {
+                    uuid: "speaker2".to_string(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn test_set_active_speaker_with_valid_uuid() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+
+        app_reducer(
+            &mut state,
+            AppAction::SetActiveSpeaker("speaker1".to_string()),
+        );
+
+        assert_eq!(state.active_speaker_uuid, Some("speaker1".to_string()));
+    }
+
+    #[test]
+    fn test_set_active_speaker_always_sets_uuid() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+
+        app_reducer(
+            &mut state,
+            AppAction::SetActiveSpeaker("any_speaker".to_string()),
+        );
+
+        assert_eq!(state.active_speaker_uuid, Some("any_speaker".to_string()));
+    }
+
+    #[test]
+    fn test_toggle_speaker_lock_with_valid_uuid() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+
+        // Lock speaker1
+        app_reducer(
+            &mut state,
+            AppAction::ToggleSpeakerLock("speaker1".to_string()),
+        );
+        assert_eq!(state.locked_speaker_uuid, Some("speaker1".to_string()));
+
+        // Unlock speaker1
+        app_reducer(
+            &mut state,
+            AppAction::ToggleSpeakerLock("speaker1".to_string()),
+        );
+        assert_eq!(state.locked_speaker_uuid, None);
+    }
+
+    #[test]
+    fn test_toggle_speaker_lock_always_works() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+
+        app_reducer(
+            &mut state,
+            AppAction::ToggleSpeakerLock("any_speaker".to_string()),
+        );
+
+        assert_eq!(state.locked_speaker_uuid, Some("any_speaker".to_string()));
+    }
+
+    #[test]
+    fn test_single_selection_constraint() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+
+        // Lock first speaker
+        app_reducer(
+            &mut state,
+            AppAction::ToggleSpeakerLock("speaker1".to_string()),
+        );
+        assert_eq!(state.locked_speaker_uuid, Some("speaker1".to_string()));
+
+        // Lock second speaker - should replace the first
+        app_reducer(
+            &mut state,
+            AppAction::ToggleSpeakerLock("speaker2".to_string()),
+        );
+        assert_eq!(state.locked_speaker_uuid, Some("speaker2".to_string()));
+    }
+
+    #[test]
+    fn test_clear_active_selection() {
+        let mut state = AppState::default();
+        state.topology = Some(create_test_topology_with_speakers());
+        state.active_speaker_uuid = Some("speaker1".to_string());
+        state.locked_speaker_uuid = Some("speaker2".to_string());
+
+        app_reducer(&mut state, AppAction::ClearActiveSelection);
+
+        assert_eq!(state.active_speaker_uuid, None);
+        assert_eq!(state.locked_speaker_uuid, None);
+    }
+
+    #[test]
+    fn test_set_topology_preserves_selections() {
+        let mut state = AppState::default();
+        state.active_speaker_uuid = Some("speaker1".to_string());
+        state.locked_speaker_uuid = Some("speaker2".to_string());
+
+        let new_topology = create_test_topology_with_speakers();
+        app_reducer(&mut state, AppAction::SetTopology(new_topology));
+
+        // Selections are preserved since we removed validation
+        assert_eq!(state.active_speaker_uuid, Some("speaker1".to_string()));
+        assert_eq!(state.locked_speaker_uuid, Some("speaker2".to_string()));
+    }
+}

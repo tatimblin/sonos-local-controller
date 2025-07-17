@@ -1,75 +1,119 @@
-use ratatui::{layout::Rect, Frame};
+use ratatui::{layout::Rect, Frame, style::{Style, Stylize}, widgets::{Block, List, ListItem, ListState}};
 
-use crate::{topology::{topology_item::TopologyItem, topology_list::TopologyList}, widgets::selectable_list::SelectableList};
+use crate::{topology::{topology_item::TopologyItem, topology_list::TopologyList}, state::store::{AppState, SpeakerDisplayState}};
 
 pub struct SpeakerList {
-  widget: SelectableList,
-  uuids: Vec<String>,
+  topology_items: Vec<TopologyItem>,
+  state: ListState,
 }
 
 impl SpeakerList {
   pub fn new(topology: &TopologyList) -> Self {
-    let (items, uuids): (Vec<String>, Vec<String>) = topology
-      .items
-      .iter()
-      .enumerate()
-      .map(|(i, item)| match item {
-        TopologyItem::Group { uuid, .. } => (format!("Group: {uuid}"), uuid.clone()),
-        TopologyItem::Speaker { uuid } => (format!("Speaker: {uuid}"), uuid.clone()),
-        TopologyItem::Satellite { uuid } => (format!("Satellite: {uuid}"), uuid.clone()),
-      })
-      .unzip();
-
+    let mut state = ListState::default();
+    if !topology.items.is_empty() {
+      state.select(Some(0));
+    }
+    
     Self {
-      widget: SelectableList::new(
-        "Topology",
-        items
-      ),
-      uuids
+      topology_items: topology.items.clone(),
+      state,
     }
   }
 
   pub fn new_with<F>(
     topology: &TopologyList,
-    item_fn: F
+    _item_fn: F
   ) -> Self
   where
     F: Fn(&TopologyItem) -> (String, String),
   {
-    let (items, uuids): (Vec<String>, Vec<String>) = topology
-      .items
-      .iter()
-      .map(|item| item_fn(item))
-      .unzip();
-
+    let mut state = ListState::default();
+    if !topology.items.is_empty() {
+      state.select(Some(0));
+    }
+    
     Self {
-      widget: SelectableList::new(
-        "Topology",
-        items
-      ),
-      uuids
+      topology_items: topology.items.clone(),
+      state,
     }
   }
 
-  pub fn draw(&mut self, frame: &mut Frame, layout: Rect) {
-    self.widget.draw(frame, layout);
+  pub fn draw(&mut self, frame: &mut Frame, layout: Rect, app_state: &AppState) {
+    let list_items: Vec<ListItem> = self
+      .topology_items
+      .iter()
+      .enumerate()
+      .map(|(_i, item)| {
+        let display_text = match item {
+          TopologyItem::Group { uuid: _, name } => format!("Group: {name}"),
+          TopologyItem::Speaker { uuid } => format!("  Speaker: {uuid}"),
+          TopologyItem::Satellite { uuid } => format!("  Satellite: {uuid}"),
+        };
+        
+        let uuid = item.get_uuid();
+        let display_state = app_state.get_speaker_display_state(uuid);
+        let style = self.get_item_style(&display_state);
+        
+        ListItem::new(display_text).style(style)
+      })
+      .collect();
+
+    let list = List::new(list_items)
+      .block(Block::default().title("Topology"))
+      .highlight_style(Style::new().reversed())
+      .highlight_symbol(">> ");
+
+    frame.render_stateful_widget(list, layout, &mut self.state);
   }
 
+  /// Get the appropriate style for a speaker based on its display state
+  fn get_item_style(&self, display_state: &SpeakerDisplayState) -> Style {
+    match display_state {
+      SpeakerDisplayState::Normal => Style::default(),
+      SpeakerDisplayState::Active => Style::default().reversed(),
+      SpeakerDisplayState::Locked => Style::default().bold().yellow(),
+      SpeakerDisplayState::ActiveAndLocked => Style::default().bold().yellow().reversed(),
+    }
+  }
+
+  /// Move highlight to next item
   pub fn next(&mut self) {
-    self.widget.next();
+    if self.topology_items.is_empty() {
+      return;
+    }
+
+    let i = self.state.selected().unwrap_or(0);
+    let next = (i + 1) % self.topology_items.len();
+    self.state.select(Some(next));
   }
 
+  /// Move highlight to previous item
   pub fn previous(&mut self) {
-    self.widget.previous();
+    if self.topology_items.is_empty() {
+      return;
+    }
+
+    let i = match self.state.selected() {
+      Some(i) => {
+        if i == 0 {
+          self.topology_items.len() - 1
+        } else {
+          i - 1
+        }
+      }
+      None => 0,
+    };
+    self.state.select(Some(i));
   }
 
-  fn selected(&self) -> Option<usize> {
-    self.widget.selected()
+  /// Get currently highlighted item
+  pub fn selected(&self) -> Option<&TopologyItem> {
+    self.state.selected().and_then(|i| self.topology_items.get(i))
   }
 
-  pub fn selected_uuid(&self) -> Option<&str> {
-    self.selected().and_then(|i| self.uuids.get(i).map(String::as_str))
-  }
+
+
+
 }
 
 // #[cfg(test)]
