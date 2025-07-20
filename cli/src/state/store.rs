@@ -56,12 +56,37 @@ impl AppState {
 
 pub struct Store {
     state: Arc<Mutex<AppState>>,
+    discovery_system: Arc<Mutex<Option<System>>>,
 }
 
 impl Store {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(AppState::default())),
+            discovery_system: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn new_with_system(system: System) -> Self {
+        let store = Self::new();
+        store.set_discovery_system(system);
+        store
+    }
+
+    pub fn set_discovery_system(&self, system: System) {
+        let mut discovery_system = self.discovery_system.lock().unwrap();
+        *discovery_system = Some(system);
+    }
+
+    pub fn with_discovery_system<F, T>(&self, f: F) -> Option<T>
+    where
+        F: FnOnce(&mut System) -> T,
+    {
+        let mut discovery_system = self.discovery_system.lock().unwrap();
+        if let Some(ref mut system) = *discovery_system {
+            Some(f(system))
+        } else {
+            None
         }
     }
 

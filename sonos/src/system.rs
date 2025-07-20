@@ -8,6 +8,8 @@ use log::{info, warn, error, debug};
 use crate::topology::Topology;
 use crate::speaker::{Speaker, SpeakerFactory, SpeakerTrait};
 use crate::util::ssdp::send_ssdp_request;
+use crate::command::SpeakerCommand;
+use crate::error::SonosError;
 
 pub struct System {
   speakers: HashMap<String, Box<dyn SpeakerTrait>>,
@@ -53,6 +55,32 @@ impl System {
   /// Gets a speaker by UUID
   pub fn get_speaker_by_uuid(&self, uuid: &str) -> Option<&Box<dyn SpeakerTrait>> {
     self.speakers.get(uuid)
+  }
+
+  /// Send a command to a specific speaker by UUID
+  pub fn send_command_to_speaker(&self, uuid: &str, command: SpeakerCommand) -> std::result::Result<(), SonosError> {
+    let speaker = self.get_speaker_by_uuid(uuid)
+      .ok_or_else(|| SonosError::DeviceNotFound(uuid.to_string()))?;
+    
+    match command {
+      SpeakerCommand::Play => speaker.play(),
+      SpeakerCommand::Pause => speaker.pause(),
+      SpeakerCommand::SetVolume(vol) => {
+        speaker.set_volume(vol)?;
+        Ok(())
+      },
+      SpeakerCommand::AdjustVolume(adj) => {
+        speaker.adjust_volume(adj)?;
+        Ok(())
+      },
+    }
+  }
+
+  /// Get the current volume of a specific speaker by UUID
+  pub fn get_speaker_volume(&self, uuid: &str) -> std::result::Result<u8, SonosError> {
+    let speaker = self.get_speaker_by_uuid(uuid)
+      .ok_or_else(|| SonosError::DeviceNotFound(uuid.to_string()))?;
+    speaker.get_volume()
   }
 
   #[cfg(test)]
@@ -698,5 +726,140 @@ mod tests {
     assert!(discovery_debug.contains("DiscoveryComplete"));
     assert!(error_debug.contains("Error"));
     assert!(error_debug.contains("Test error"));
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_send_command_to_speaker_with_valid_uuid() {
+    let mut system = System::new().unwrap();
+    
+    // Add test speaker
+    let speaker = create_test_speaker("RINCON_123", "Living Room", "192.168.1.100");
+    system.add_speaker_for_test(speaker);
+    
+    // Test Play command
+    let result = system.send_command_to_speaker("RINCON_123", SpeakerCommand::Play);
+    assert!(result.is_ok());
+    
+    // Test Pause command
+    let result = system.send_command_to_speaker("RINCON_123", SpeakerCommand::Pause);
+    assert!(result.is_ok());
+    
+    // Test SetVolume command
+    let result = system.send_command_to_speaker("RINCON_123", SpeakerCommand::SetVolume(50));
+    assert!(result.is_ok());
+    
+    // Test AdjustVolume command
+    let result = system.send_command_to_speaker("RINCON_123", SpeakerCommand::AdjustVolume(5));
+    assert!(result.is_ok());
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_send_command_to_speaker_with_invalid_uuid() {
+    let system = System::new().unwrap();
+    
+    // Test with non-existent UUID
+    let result = system.send_command_to_speaker("RINCON_INVALID", SpeakerCommand::Play);
+    assert!(result.is_err());
+    
+    if let Err(SonosError::DeviceNotFound(uuid)) = result {
+      assert_eq!(uuid, "RINCON_INVALID");
+    } else {
+      panic!("Expected DeviceNotFound error");
+    }
+    
+    // Test with empty UUID
+    let result = system.send_command_to_speaker("", SpeakerCommand::Pause);
+    assert!(result.is_err());
+    assert!(matches!(result, Err(SonosError::DeviceNotFound(_))));
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_get_speaker_volume_with_valid_uuid() {
+    let mut system = System::new().unwrap();
+    
+    // Add test speaker
+    let speaker = create_test_speaker("RINCON_123", "Living Room", "192.168.1.100");
+    system.add_speaker_for_test(speaker);
+    
+    // Test getting volume
+    let result = system.get_speaker_volume("RINCON_123");
+    assert!(result.is_ok());
+    
+    // Mock speakers return a default volume
+    let volume = result.unwrap();
+    assert!(volume <= 100); // Volume should be valid range
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_get_speaker_volume_with_invalid_uuid() {
+    let system = System::new().unwrap();
+    
+    // Test with non-existent UUID
+    let result = system.get_speaker_volume("RINCON_INVALID");
+    assert!(result.is_err());
+    
+    if let Err(SonosError::DeviceNotFound(uuid)) = result {
+      assert_eq!(uuid, "RINCON_INVALID");
+    } else {
+      panic!("Expected DeviceNotFound error");
+    }
+    
+    // Test with empty UUID
+    let result = system.get_speaker_volume("");
+    assert!(result.is_err());
+    assert!(matches!(result, Err(SonosError::DeviceNotFound(_))));
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_command_delegation_error_handling() {
+    let mut system = System::new().unwrap();
+    
+    // Add test speaker
+    let speaker = create_test_speaker("RINCON_123", "Living Room", "192.168.1.100");
+    system.add_speaker_for_test(speaker);
+    
+    // All commands should work with mock speakers (they don't simulate errors)
+    // But we can test that the delegation happens correctly
+    
+    // Test multiple commands on same speaker
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::Play).is_ok());
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::Pause).is_ok());
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::SetVolume(75)).is_ok());
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::AdjustVolume(-10)).is_ok());
+    
+    // Test volume queries
+    assert!(system.get_speaker_volume("RINCON_123").is_ok());
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_command_delegation_with_multiple_speakers() {
+    let mut system = System::new().unwrap();
+    
+    // Add multiple test speakers
+    let speaker1 = create_test_speaker("RINCON_123", "Living Room", "192.168.1.100");
+    let speaker2 = create_test_speaker("RINCON_456", "Kitchen", "192.168.1.101");
+    system.add_speaker_for_test(speaker1);
+    system.add_speaker_for_test(speaker2);
+    
+    // Test commands on different speakers
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::Play).is_ok());
+    assert!(system.send_command_to_speaker("RINCON_456", SpeakerCommand::Pause).is_ok());
+    
+    // Test volume operations on different speakers
+    assert!(system.get_speaker_volume("RINCON_123").is_ok());
+    assert!(system.get_speaker_volume("RINCON_456").is_ok());
+    
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::SetVolume(30)).is_ok());
+    assert!(system.send_command_to_speaker("RINCON_456", SpeakerCommand::SetVolume(60)).is_ok());
+    
+    // Test that invalid UUIDs still fail
+    assert!(system.send_command_to_speaker("RINCON_999", SpeakerCommand::Play).is_err());
+    assert!(system.get_speaker_volume("RINCON_999").is_err());
   }
 }
