@@ -238,4 +238,91 @@ mod tests {
         assert_ne!(state.status_message, initial_status);
         assert_eq!(state.status_message, "System not ready");
     }
+
+    #[test]
+    fn test_set_system_action_updates_state() {
+        let mut state = AppState::default();
+        assert!(state.system.is_none());
+
+        // Create a system for testing
+        match System::new() {
+            Ok(system) => {
+                let system_arc = Arc::new(system);
+                app_reducer(&mut state, AppAction::SetSystem(system_arc.clone()));
+                
+                assert!(state.system.is_some());
+                // Verify it's the same Arc by comparing pointer addresses
+                assert!(Arc::ptr_eq(state.system.as_ref().unwrap(), &system_arc));
+            }
+            Err(_) => {
+                // Skip test if system creation fails (no network/hardware available)
+                println!("Skipping test_set_system_action_updates_state - System::new() failed");
+            }
+        }
+    }
+
+    #[test]
+    fn test_send_speaker_command_with_different_commands() {
+        let mut state = AppState::default();
+        
+        // Test each command type updates status appropriately when no system is available
+        let commands = vec![
+            SpeakerCommand::Play,
+            SpeakerCommand::Pause,
+            SpeakerCommand::SetVolume(50),
+            SpeakerCommand::AdjustVolume(5),
+        ];
+
+        for command in commands {
+            state.status_message = "initial".to_string();
+            
+            app_reducer(&mut state, AppAction::SendSpeakerCommand {
+                uuid: "test-speaker".to_string(),
+                command,
+            });
+
+            assert_eq!(state.status_message, "System not ready");
+        }
+    }
+
+    #[test]
+    fn test_send_speaker_command_preserves_other_state() {
+        let mut state = AppState::default();
+        state.active_speaker_uuid = Some("active-speaker".to_string());
+        state.locked_speaker_uuid = Some("locked-speaker".to_string());
+        state.topology = Some(create_test_topology_with_speakers());
+        
+        app_reducer(&mut state, AppAction::SendSpeakerCommand {
+            uuid: "test-uuid".to_string(),
+            command: SpeakerCommand::Play,
+        });
+
+        // Other state should be preserved
+        assert_eq!(state.active_speaker_uuid, Some("active-speaker".to_string()));
+        assert_eq!(state.locked_speaker_uuid, Some("locked-speaker".to_string()));
+        assert!(state.topology.is_some());
+    }
+
+    #[test]
+    fn test_set_status_message_action() {
+        let mut state = AppState::default();
+        let test_message = "Test status message";
+        
+        app_reducer(&mut state, AppAction::SetStatusMessage(test_message.to_string()));
+        
+        assert_eq!(state.status_message, test_message);
+    }
+
+    #[test]
+    fn test_set_topology_switches_to_control_view() {
+        let mut state = AppState::default();
+        assert_eq!(state.view, ViewType::Startup);
+        assert!(state.topology.is_none());
+        
+        let topology = create_test_topology_with_speakers();
+        app_reducer(&mut state, AppAction::SetTopology(topology));
+        
+        assert_eq!(state.view, ViewType::Control);
+        assert!(state.topology.is_some());
+    }
 }
