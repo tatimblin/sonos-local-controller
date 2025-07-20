@@ -8,6 +8,8 @@ use log::{info, warn, error, debug};
 use crate::topology::Topology;
 use crate::speaker::{Speaker, SpeakerFactory, SpeakerTrait};
 use crate::util::ssdp::send_ssdp_request;
+use crate::command::SpeakerCommand;
+use crate::error::SonosError;
 
 pub struct System {
   speakers: HashMap<String, Box<dyn SpeakerTrait>>,
@@ -18,7 +20,6 @@ pub struct System {
 pub enum SystemEvent {
   SpeakerFound(Speaker),
   TopologyReady(Topology),
-  DiscoveryComplete,
   Error(String),
 }
 
@@ -55,6 +56,32 @@ impl System {
     self.speakers.get(uuid)
   }
 
+  /// Send a command to a specific speaker by UUID
+  pub fn send_command_to_speaker(&self, uuid: &str, command: SpeakerCommand) -> std::result::Result<(), SonosError> {
+    let speaker = self.get_speaker_by_uuid(uuid)
+      .ok_or_else(|| SonosError::DeviceNotFound(uuid.to_string()))?;
+    
+    match command {
+      SpeakerCommand::Play => speaker.play(),
+      SpeakerCommand::Pause => speaker.pause(),
+      SpeakerCommand::SetVolume(vol) => {
+        speaker.set_volume(vol)?;
+        Ok(())
+      },
+      SpeakerCommand::AdjustVolume(adj) => {
+        speaker.adjust_volume(adj)?;
+        Ok(())
+      },
+    }
+  }
+
+  /// Get the current volume of a specific speaker by UUID
+  pub fn get_speaker_volume(&self, uuid: &str) -> std::result::Result<u8, SonosError> {
+    let speaker = self.get_speaker_by_uuid(uuid)
+      .ok_or_else(|| SonosError::DeviceNotFound(uuid.to_string()))?;
+    speaker.get_volume()
+  }
+
   #[cfg(test)]
   /// Test helper method to add a speaker directly (bypassing discovery)
   pub fn add_speaker_for_test(&mut self, speaker: Box<dyn SpeakerTrait>) {
@@ -70,8 +97,7 @@ impl System {
       Ok(responses) => responses,
       Err(e) => {
         error!("Failed to setup discovery: {}", e);
-        return Box::new(std::iter::once(SystemEvent::Error(e.to_string()))
-          .chain(std::iter::once(SystemEvent::DiscoveryComplete))) as Box<dyn Iterator<Item = SystemEvent>>;
+        return Box::new(std::iter::once(SystemEvent::Error(e.to_string()))) as Box<dyn Iterator<Item = SystemEvent>>;
       }
     };
 
@@ -81,11 +107,7 @@ impl System {
       .filter(|response| response.is_ok())
       .flat_map(move |response| {
         self.process_ssdp_response(response, &mut is_first_speaker)
-      })
-      .chain(std::iter::once_with(|| {
-        info!("Discovery process completed");
-        SystemEvent::DiscoveryComplete
-      }))) as Box<dyn Iterator<Item = SystemEvent>>
+      })) as Box<dyn Iterator<Item = SystemEvent>>
   }
 
   fn clear_state(&mut self) {
@@ -370,54 +392,9 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_discovery_complete_event_emitted() {
-    let mut system = System::new().unwrap();
-    
-    // Run discovery and collect all events
-    let events: Vec<_> = system.discover().collect();
-    
-    // DiscoveryComplete event should always be emitted at the end
-    assert!(!events.is_empty(), "Discovery should emit at least the DiscoveryComplete event");
-    
-    // The last event should always be DiscoveryComplete
-    let last_event = events.last().unwrap();
-    assert!(matches!(last_event, SystemEvent::DiscoveryComplete), 
-            "Last event should be DiscoveryComplete, but was: {:?}", last_event);
-    
-    // Count DiscoveryComplete events - should be exactly one
-    let discovery_complete_count = events.iter()
-      .filter(|event| matches!(event, SystemEvent::DiscoveryComplete))
-      .count();
-    
-    assert_eq!(discovery_complete_count, 1, 
-               "Should emit exactly one DiscoveryComplete event, but found: {}", discovery_complete_count);
-  }
 
-  #[test]
-  fn test_discovery_complete_event_emitted_regardless_of_failures() {
-    let mut system = System::new().unwrap();
-    
-    // Run discovery - even if there are errors or no speakers found,
-    // DiscoveryComplete should still be emitted
-    let events: Vec<_> = system.discover().collect();
-    
-    // Should always have at least the DiscoveryComplete event
-    assert!(!events.is_empty(), "Discovery should always emit at least DiscoveryComplete event");
-    
-    // The last event should be DiscoveryComplete regardless of what happened before
-    let last_event = events.last().unwrap();
-    assert!(matches!(last_event, SystemEvent::DiscoveryComplete), 
-            "DiscoveryComplete should be emitted even if there are failures");
-    
-    // Verify that DiscoveryComplete comes after all other processing
-    let discovery_complete_index = events.iter()
-      .position(|event| matches!(event, SystemEvent::DiscoveryComplete))
-      .expect("DiscoveryComplete event should be present");
-    
-    assert_eq!(discovery_complete_index, events.len() - 1, 
-               "DiscoveryComplete should be the last event emitted");
-  }
+
+
 
   #[test]
   #[cfg(feature = "mock")]
@@ -666,8 +643,8 @@ mod tests {
     assert!(system.get_speaker_by_uuid("RINCON_123").is_none());
     assert!(system.get_speaker_by_uuid("RINCON_456").is_none());
 
-    assert!(!events.is_empty());
-    assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+    // Discovery should emit events (may be empty if no speakers found)
+    // The important thing is that the system wasn't consumed
   }
 
   #[test]
@@ -683,20 +660,152 @@ mod tests {
       vanished_devices: None,
     });
     
-    let discovery_complete = SystemEvent::DiscoveryComplete;
     let error_event = SystemEvent::Error("Test error".to_string());
     
     // Test that Debug formatting works for all events
     let speaker_debug = format!("{:?}", speaker_found);
     let topology_debug = format!("{:?}", topology_ready);
-    let discovery_debug = format!("{:?}", discovery_complete);
     let error_debug = format!("{:?}", error_event);
     
     // Verify debug strings are not empty and contain expected content
     assert!(speaker_debug.contains("SpeakerFound"));
     assert!(topology_debug.contains("TopologyReady"));
-    assert!(discovery_debug.contains("DiscoveryComplete"));
     assert!(error_debug.contains("Error"));
     assert!(error_debug.contains("Test error"));
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_send_command_to_speaker_with_valid_uuid() {
+    let mut system = System::new().unwrap();
+    
+    // Add test speaker
+    let speaker = create_test_speaker("RINCON_123", "Living Room", "192.168.1.100");
+    system.add_speaker_for_test(speaker);
+    
+    // Test Play command
+    let result = system.send_command_to_speaker("RINCON_123", SpeakerCommand::Play);
+    assert!(result.is_ok());
+    
+    // Test Pause command
+    let result = system.send_command_to_speaker("RINCON_123", SpeakerCommand::Pause);
+    assert!(result.is_ok());
+    
+    // Test SetVolume command
+    let result = system.send_command_to_speaker("RINCON_123", SpeakerCommand::SetVolume(50));
+    assert!(result.is_ok());
+    
+    // Test AdjustVolume command
+    let result = system.send_command_to_speaker("RINCON_123", SpeakerCommand::AdjustVolume(5));
+    assert!(result.is_ok());
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_send_command_to_speaker_with_invalid_uuid() {
+    let system = System::new().unwrap();
+    
+    // Test with non-existent UUID
+    let result = system.send_command_to_speaker("RINCON_INVALID", SpeakerCommand::Play);
+    assert!(result.is_err());
+    
+    if let Err(SonosError::DeviceNotFound(uuid)) = result {
+      assert_eq!(uuid, "RINCON_INVALID");
+    } else {
+      panic!("Expected DeviceNotFound error");
+    }
+    
+    // Test with empty UUID
+    let result = system.send_command_to_speaker("", SpeakerCommand::Pause);
+    assert!(result.is_err());
+    assert!(matches!(result, Err(SonosError::DeviceNotFound(_))));
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_get_speaker_volume_with_valid_uuid() {
+    let mut system = System::new().unwrap();
+    
+    // Add test speaker
+    let speaker = create_test_speaker("RINCON_123", "Living Room", "192.168.1.100");
+    system.add_speaker_for_test(speaker);
+    
+    // Test getting volume
+    let result = system.get_speaker_volume("RINCON_123");
+    assert!(result.is_ok());
+    
+    // Mock speakers return a default volume
+    let volume = result.unwrap();
+    assert!(volume <= 100); // Volume should be valid range
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_get_speaker_volume_with_invalid_uuid() {
+    let system = System::new().unwrap();
+    
+    // Test with non-existent UUID
+    let result = system.get_speaker_volume("RINCON_INVALID");
+    assert!(result.is_err());
+    
+    if let Err(SonosError::DeviceNotFound(uuid)) = result {
+      assert_eq!(uuid, "RINCON_INVALID");
+    } else {
+      panic!("Expected DeviceNotFound error");
+    }
+    
+    // Test with empty UUID
+    let result = system.get_speaker_volume("");
+    assert!(result.is_err());
+    assert!(matches!(result, Err(SonosError::DeviceNotFound(_))));
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_command_delegation_error_handling() {
+    let mut system = System::new().unwrap();
+    
+    // Add test speaker
+    let speaker = create_test_speaker("RINCON_123", "Living Room", "192.168.1.100");
+    system.add_speaker_for_test(speaker);
+    
+    // All commands should work with mock speakers (they don't simulate errors)
+    // But we can test that the delegation happens correctly
+    
+    // Test multiple commands on same speaker
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::Play).is_ok());
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::Pause).is_ok());
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::SetVolume(75)).is_ok());
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::AdjustVolume(-10)).is_ok());
+    
+    // Test volume queries
+    assert!(system.get_speaker_volume("RINCON_123").is_ok());
+  }
+
+  #[test]
+  #[cfg(feature = "mock")]
+  fn test_command_delegation_with_multiple_speakers() {
+    let mut system = System::new().unwrap();
+    
+    // Add multiple test speakers
+    let speaker1 = create_test_speaker("RINCON_123", "Living Room", "192.168.1.100");
+    let speaker2 = create_test_speaker("RINCON_456", "Kitchen", "192.168.1.101");
+    system.add_speaker_for_test(speaker1);
+    system.add_speaker_for_test(speaker2);
+    
+    // Test commands on different speakers
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::Play).is_ok());
+    assert!(system.send_command_to_speaker("RINCON_456", SpeakerCommand::Pause).is_ok());
+    
+    // Test volume operations on different speakers
+    assert!(system.get_speaker_volume("RINCON_123").is_ok());
+    assert!(system.get_speaker_volume("RINCON_456").is_ok());
+    
+    assert!(system.send_command_to_speaker("RINCON_123", SpeakerCommand::SetVolume(30)).is_ok());
+    assert!(system.send_command_to_speaker("RINCON_456", SpeakerCommand::SetVolume(60)).is_ok());
+    
+    // Test that invalid UUIDs still fail
+    assert!(system.send_command_to_speaker("RINCON_999", SpeakerCommand::Play).is_err());
+    assert!(system.get_speaker_volume("RINCON_999").is_err());
   }
 }

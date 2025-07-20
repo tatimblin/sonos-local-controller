@@ -19,6 +19,9 @@ pub use util::ssdp;
 mod error;
 pub use error::SonosError;
 
+mod command;
+pub use command::SpeakerCommand;
+
 #[cfg(feature = "mock")]
 pub mod testing {
   pub use crate::speaker::mock::MockSpeaker;

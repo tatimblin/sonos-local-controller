@@ -41,9 +41,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             SystemEvent::TopologyReady(topology) => {
                 println!("Topology: {} groups", topology.zone_group_count());
             },
-            SystemEvent::DiscoveryComplete => {
-                println!("Discovery finished!");
-            },
             SystemEvent::Error(msg) => {
                 println!("Error: {}", msg);
             },
@@ -148,7 +145,6 @@ pub enum SystemEvent {
     SpeakerFound(Speaker),           // Individual speaker discovered
     TopologyReady(Topology),         // Complete topology available
     Error(String),                   // General errors
-    DiscoveryComplete,               // Discovery process finished
 }
 ```
 

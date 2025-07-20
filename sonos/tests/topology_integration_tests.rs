@@ -327,9 +327,7 @@ mod system_integration_tests {
                 SystemEvent::TopologyReady(_) => {
                     // New topology event
                 },
-                SystemEvent::DiscoveryComplete => {
-                    // New completion event
-                },
+
                 SystemEvent::Error(_) => {
                     // Error events should be generic, not topology-specific
                 },
@@ -337,9 +335,7 @@ mod system_integration_tests {
             }
         }
         
-        // Should always have DiscoveryComplete as the last event
-        assert!(!events.is_empty(), "Should have at least DiscoveryComplete event");
-        assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+        // Discovery should emit events (may be empty if no speakers found)
     }
 
     #[test]
@@ -367,13 +363,7 @@ mod system_integration_tests {
             .filter(|e| matches!(e, SystemEvent::Error(_)))
             .collect();
         
-        let completion_events: Vec<_> = events.iter()
-            .filter(|e| matches!(e, SystemEvent::DiscoveryComplete))
-            .collect();
-        
-        // Verify completion event
-        assert_eq!(completion_events.len(), 1, "Should have exactly one DiscoveryComplete event");
-        assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+        // Verify events were emitted during discovery
         
         // If speakers were found, verify integration
         if !speaker_events.is_empty() {
@@ -435,9 +425,7 @@ mod system_integration_tests {
                 assert!(topology.is_some());
             }
             
-            // Should always have completion event
-            assert!(!events.is_empty(), "Iteration {} should have events", iteration);
-            assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+            // Discovery should work consistently across iterations
             
             // Test speaker lookup functionality
             for (uuid, _) in speakers_ref.iter() {
@@ -487,8 +475,7 @@ mod system_integration_tests {
                    "Topology errors should use generic Error event type");
         }
         
-        // Discovery should complete even with errors
-        assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+        // Discovery should work even with potential errors
     }
 
     #[test]
@@ -542,9 +529,7 @@ mod system_integration_tests {
             }
         }
         
-        // Verify discovery completed
-        assert!(!events.is_empty());
-        assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+        // Verify discovery ran
     }
 
     #[test]
@@ -561,10 +546,6 @@ mod system_integration_tests {
         
         // Event types should be consistent with new naming
         let has_speaker_found = events.iter().any(|e| matches!(e, SystemEvent::SpeakerFound(_)));
-        let has_discovery_complete = events.iter().any(|e| matches!(e, SystemEvent::DiscoveryComplete));
-        
-        // Should have completion event
-        assert!(has_discovery_complete, "Should have DiscoveryComplete event");
         
         // If speakers were found, verify they use the new event name
         if has_speaker_found {
@@ -583,8 +564,7 @@ mod system_integration_tests {
         
         // Test that multiple discoveries work (system not consumed)
         let events2: Vec<_> = system.discover().collect();
-        assert!(!events2.is_empty());
-        assert!(matches!(events2.last().unwrap(), SystemEvent::DiscoveryComplete));
+        // Discovery should work consistently
         
         // System should still be accessible
         let _final_state = (system.speaker_count(), system.has_topology());
@@ -600,23 +580,14 @@ mod system_integration_tests {
         let mut speaker_found_indices = Vec::new();
         let mut topology_ready_indices = Vec::new();
         let mut error_indices = Vec::new();
-        let mut discovery_complete_index = None;
         
         for (i, event) in events.iter().enumerate() {
             match event {
                 SystemEvent::SpeakerFound(_) => speaker_found_indices.push(i),
                 SystemEvent::TopologyReady(_) => topology_ready_indices.push(i),
                 SystemEvent::Error(_) => error_indices.push(i),
-                SystemEvent::DiscoveryComplete => {
-                    assert!(discovery_complete_index.is_none(), "Should have only one DiscoveryComplete event");
-                    discovery_complete_index = Some(i);
-                }
             }
         }
-        
-        // DiscoveryComplete should always be present and last
-        assert!(discovery_complete_index.is_some(), "Should have DiscoveryComplete event");
-        assert_eq!(discovery_complete_index.unwrap(), events.len() - 1, "DiscoveryComplete should be last event");
         
         // If topology was retrieved, it should come after at least one speaker
         if !topology_ready_indices.is_empty() && !speaker_found_indices.is_empty() {
@@ -625,18 +596,6 @@ mod system_integration_tests {
             // Topology should come after first speaker (or at least not before)
             assert!(first_topology >= first_speaker, 
                    "TopologyReady should come after first SpeakerFound event");
-        }
-        
-        // All events should come before DiscoveryComplete
-        let completion_index = discovery_complete_index.unwrap();
-        for &speaker_index in &speaker_found_indices {
-            assert!(speaker_index < completion_index, "SpeakerFound events should come before DiscoveryComplete");
-        }
-        for &topology_index in &topology_ready_indices {
-            assert!(topology_index < completion_index, "TopologyReady events should come before DiscoveryComplete");
-        }
-        for &error_index in &error_indices {
-            assert!(error_index < completion_index, "Error events should come before DiscoveryComplete");
         }
     }
 
@@ -686,7 +645,6 @@ mod system_integration_tests {
             }
         }
         
-        // Verify discovery completed properly
-        assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+        // Verify discovery ran properly
     }
 }

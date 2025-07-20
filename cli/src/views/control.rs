@@ -88,10 +88,22 @@ impl View for ControlView {
                 }
             }
             KeyCode::Left => {
-                store.dispatch(AppAction::AdjustVolume(-4));
+                // Send volume down command to locked speaker if available
+                if let Some(locked_uuid) = store.with_state(|state| state.locked_speaker_uuid.clone()) {
+                    store.dispatch(AppAction::SendSpeakerCommand {
+                        uuid: locked_uuid,
+                        command: sonos::SpeakerCommand::AdjustVolume(-4),
+                    });
+                }
             }
             KeyCode::Right => {
-                store.dispatch(AppAction::AdjustVolume(4));
+                // Send volume up command to locked speaker if available
+                if let Some(locked_uuid) = store.with_state(|state| state.locked_speaker_uuid.clone()) {
+                    store.dispatch(AppAction::SendSpeakerCommand {
+                        uuid: locked_uuid,
+                        command: sonos::SpeakerCommand::AdjustVolume(4),
+                    });
+                }
             }
             KeyCode::Char(' ') => {
                 // Toggle lock for the currently highlighted item if it's a speaker
@@ -99,6 +111,24 @@ impl View for ControlView {
                     if let TopologyItem::Speaker { uuid } = selected_item {
                         store.dispatch(AppAction::ToggleSpeakerLock(uuid.clone()));
                     }
+                }
+            }
+            KeyCode::Char('p') => {
+                // Send play command to locked speaker if available
+                if let Some(locked_uuid) = store.with_state(|state| state.locked_speaker_uuid.clone()) {
+                    store.dispatch(AppAction::SendSpeakerCommand {
+                        uuid: locked_uuid,
+                        command: sonos::SpeakerCommand::Play,
+                    });
+                }
+            }
+            KeyCode::Char('s') => {
+                // Send pause command to locked speaker if available
+                if let Some(locked_uuid) = store.with_state(|state| state.locked_speaker_uuid.clone()) {
+                    store.dispatch(AppAction::SendSpeakerCommand {
+                        uuid: locked_uuid,
+                        command: sonos::SpeakerCommand::Pause,
+                    });
                 }
             }
             _ => {

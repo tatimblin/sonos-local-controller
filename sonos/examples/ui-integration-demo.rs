@@ -251,9 +251,7 @@ impl UIState {
             SystemEvent::Error(msg) => {
                 self.errors.push(msg.clone());
             },
-            SystemEvent::DiscoveryComplete => {
-                self.discovery_complete = true;
-            },
+
         }
     }
     
@@ -404,9 +402,7 @@ fn migration_example() {
                 println!("Topology ready: {} groups", topology.zone_group_count());
             },
             
-            SystemEvent::DiscoveryComplete => {
-                println!("Discovery finished");
-            },
+
             
             SystemEvent::Error(msg) => {
                 println!("Error: {}", msg);
