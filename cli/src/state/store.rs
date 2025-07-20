@@ -70,6 +70,21 @@ impl Store {
     pub fn new_with_system(system: System) -> Self {
         let store = Self::new();
         store.set_discovery_system(system);
+
+        // Create command system immediately
+        match System::new() {
+            Ok(command_system) => {
+                let system_arc = Arc::new(command_system);
+                store.dispatch(AppAction::SetSystem(system_arc));
+            }
+            Err(e) => {
+                log::error!(
+                    "Failed to create command system during store initialization: {:?}",
+                    e
+                );
+            }
+        }
+
         store
     }
 

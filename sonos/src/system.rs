@@ -20,7 +20,6 @@ pub struct System {
 pub enum SystemEvent {
   SpeakerFound(Speaker),
   TopologyReady(Topology),
-  DiscoveryComplete,
   Error(String),
 }
 
@@ -98,8 +97,7 @@ impl System {
       Ok(responses) => responses,
       Err(e) => {
         error!("Failed to setup discovery: {}", e);
-        return Box::new(std::iter::once(SystemEvent::Error(e.to_string()))
-          .chain(std::iter::once(SystemEvent::DiscoveryComplete))) as Box<dyn Iterator<Item = SystemEvent>>;
+        return Box::new(std::iter::once(SystemEvent::Error(e.to_string()))) as Box<dyn Iterator<Item = SystemEvent>>;
       }
     };
 
@@ -109,11 +107,7 @@ impl System {
       .filter(|response| response.is_ok())
       .flat_map(move |response| {
         self.process_ssdp_response(response, &mut is_first_speaker)
-      })
-      .chain(std::iter::once_with(|| {
-        info!("Discovery process completed");
-        SystemEvent::DiscoveryComplete
-      }))) as Box<dyn Iterator<Item = SystemEvent>>
+      })) as Box<dyn Iterator<Item = SystemEvent>>
   }
 
   fn clear_state(&mut self) {
@@ -398,54 +392,9 @@ mod tests {
     }
   }
 
-  #[test]
-  fn test_discovery_complete_event_emitted() {
-    let mut system = System::new().unwrap();
-    
-    // Run discovery and collect all events
-    let events: Vec<_> = system.discover().collect();
-    
-    // DiscoveryComplete event should always be emitted at the end
-    assert!(!events.is_empty(), "Discovery should emit at least the DiscoveryComplete event");
-    
-    // The last event should always be DiscoveryComplete
-    let last_event = events.last().unwrap();
-    assert!(matches!(last_event, SystemEvent::DiscoveryComplete), 
-            "Last event should be DiscoveryComplete, but was: {:?}", last_event);
-    
-    // Count DiscoveryComplete events - should be exactly one
-    let discovery_complete_count = events.iter()
-      .filter(|event| matches!(event, SystemEvent::DiscoveryComplete))
-      .count();
-    
-    assert_eq!(discovery_complete_count, 1, 
-               "Should emit exactly one DiscoveryComplete event, but found: {}", discovery_complete_count);
-  }
 
-  #[test]
-  fn test_discovery_complete_event_emitted_regardless_of_failures() {
-    let mut system = System::new().unwrap();
-    
-    // Run discovery - even if there are errors or no speakers found,
-    // DiscoveryComplete should still be emitted
-    let events: Vec<_> = system.discover().collect();
-    
-    // Should always have at least the DiscoveryComplete event
-    assert!(!events.is_empty(), "Discovery should always emit at least DiscoveryComplete event");
-    
-    // The last event should be DiscoveryComplete regardless of what happened before
-    let last_event = events.last().unwrap();
-    assert!(matches!(last_event, SystemEvent::DiscoveryComplete), 
-            "DiscoveryComplete should be emitted even if there are failures");
-    
-    // Verify that DiscoveryComplete comes after all other processing
-    let discovery_complete_index = events.iter()
-      .position(|event| matches!(event, SystemEvent::DiscoveryComplete))
-      .expect("DiscoveryComplete event should be present");
-    
-    assert_eq!(discovery_complete_index, events.len() - 1, 
-               "DiscoveryComplete should be the last event emitted");
-  }
+
+
 
   #[test]
   #[cfg(feature = "mock")]
@@ -694,8 +643,8 @@ mod tests {
     assert!(system.get_speaker_by_uuid("RINCON_123").is_none());
     assert!(system.get_speaker_by_uuid("RINCON_456").is_none());
 
-    assert!(!events.is_empty());
-    assert!(matches!(events.last().unwrap(), SystemEvent::DiscoveryComplete));
+    // Discovery should emit events (may be empty if no speakers found)
+    // The important thing is that the system wasn't consumed
   }
 
   #[test]
@@ -711,19 +660,16 @@ mod tests {
       vanished_devices: None,
     });
     
-    let discovery_complete = SystemEvent::DiscoveryComplete;
     let error_event = SystemEvent::Error("Test error".to_string());
     
     // Test that Debug formatting works for all events
     let speaker_debug = format!("{:?}", speaker_found);
     let topology_debug = format!("{:?}", topology_ready);
-    let discovery_debug = format!("{:?}", discovery_complete);
     let error_debug = format!("{:?}", error_event);
     
     // Verify debug strings are not empty and contain expected content
     assert!(speaker_debug.contains("SpeakerFound"));
     assert!(topology_debug.contains("TopologyReady"));
-    assert!(discovery_debug.contains("DiscoveryComplete"));
     assert!(error_debug.contains("Error"));
     assert!(error_debug.contains("Test error"));
   }
