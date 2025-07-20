@@ -321,10 +321,10 @@ mod system_integration_tests {
         // Verify event types are correct (no old "Found" events)
         for event in &events {
             match event {
-                SystemEvent::SpeakerFound(_) => {
+                SystemEvent::SpeakerChange(_) => {
                     // This is the correct new event name
                 },
-                SystemEvent::TopologyReady(_) => {
+                SystemEvent::TopologyChange(_) => {
                     // New topology event
                 },
 
@@ -352,11 +352,11 @@ mod system_integration_tests {
         
         // Analyze the discovery flow
         let speaker_events: Vec<_> = events.iter()
-            .filter(|e| matches!(e, SystemEvent::SpeakerFound(_)))
+            .filter(|e| matches!(e, SystemEvent::SpeakerChange(_)))
             .collect();
         
         let topology_events: Vec<_> = events.iter()
-            .filter(|e| matches!(e, SystemEvent::TopologyReady(_)))
+            .filter(|e| matches!(e, SystemEvent::TopologyChange(_)))
             .collect();
         
         let error_events: Vec<_> = events.iter()
@@ -384,7 +384,7 @@ mod system_integration_tests {
             
             // If topology was successful, it should be stored
             if !topology_events.is_empty() {
-                assert!(system.has_topology(), "Topology should be stored when TopologyReady event emitted");
+                assert!(system.has_topology(), "Topology should be stored when TopologyChange event emitted");
                 assert!(system.topology().is_some(), "Topology should be accessible");
                 
                 // Verify topology data integrity
@@ -394,7 +394,7 @@ mod system_integration_tests {
             
             // Verify speakers can be accessed by UUID
             for event in &speaker_events {
-                if let SystemEvent::SpeakerFound(speaker) = event {
+                if let SystemEvent::SpeakerChange(speaker) = event {
                     let uuid = speaker.uuid();
                     let stored_speaker = system.get_speaker_by_uuid(uuid);
                     assert!(stored_speaker.is_some(), "Speaker should be retrievable by UUID: {}", uuid);
@@ -453,7 +453,7 @@ mod system_integration_tests {
             .collect();
         
         let speaker_events: Vec<_> = events.iter()
-            .filter(|e| matches!(e, SystemEvent::SpeakerFound(_)))
+            .filter(|e| matches!(e, SystemEvent::SpeakerChange(_)))
             .collect();
         
         // If there were topology errors, verify they don't stop speaker discovery
@@ -545,15 +545,15 @@ mod system_integration_tests {
         let _post_discovery_count = system.speaker_count();
         
         // Event types should be consistent with new naming
-        let has_speaker_found = events.iter().any(|e| matches!(e, SystemEvent::SpeakerFound(_)));
+        let has_speaker_found = events.iter().any(|e| matches!(e, SystemEvent::SpeakerChange(_)));
         
         // If speakers were found, verify they use the new event name
         if has_speaker_found {
             // Verify no old "Found" events exist (this would be a compilation error anyway)
-            // The fact that we can match on SpeakerFound proves the rename worked
+            // The fact that we can match on SpeakerChange proves the rename worked
             
             for event in &events {
-                if let SystemEvent::SpeakerFound(speaker) = event {
+                if let SystemEvent::SpeakerChange(speaker) = event {
                     // Verify speaker data is accessible
                     assert!(!speaker.uuid().is_empty());
                     assert!(!speaker.name().is_empty());
@@ -583,8 +583,8 @@ mod system_integration_tests {
         
         for (i, event) in events.iter().enumerate() {
             match event {
-                SystemEvent::SpeakerFound(_) => speaker_found_indices.push(i),
-                SystemEvent::TopologyReady(_) => topology_ready_indices.push(i),
+                SystemEvent::SpeakerChange(_) => speaker_found_indices.push(i),
+                SystemEvent::TopologyChange(_) => topology_ready_indices.push(i),
                 SystemEvent::Error(_) => error_indices.push(i),
             }
         }
@@ -595,7 +595,7 @@ mod system_integration_tests {
             let first_speaker = speaker_found_indices[0];
             // Topology should come after first speaker (or at least not before)
             assert!(first_topology >= first_speaker, 
-                   "TopologyReady should come after first SpeakerFound event");
+                   "TopologyChange should come after first SpeakerChange event");
         }
     }
 
@@ -606,11 +606,11 @@ mod system_integration_tests {
         let events: Vec<_> = system.discover().collect();
         
         let speaker_events: Vec<_> = events.iter()
-            .filter_map(|e| if let SystemEvent::SpeakerFound(speaker) = e { Some(speaker) } else { None })
+            .filter_map(|e| if let SystemEvent::SpeakerChange(speaker) = e { Some(speaker) } else { None })
             .collect();
         
         let topology_events: Vec<_> = events.iter()
-            .filter_map(|e| if let SystemEvent::TopologyReady(topology) = e { Some(topology) } else { None })
+            .filter_map(|e| if let SystemEvent::TopologyChange(topology) = e { Some(topology) } else { None })
             .collect();
         
         // If both speakers and topology were found, verify integration

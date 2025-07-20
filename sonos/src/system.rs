@@ -18,8 +18,8 @@ pub struct System {
 
 #[derive(Debug)]
 pub enum SystemEvent {
-  SpeakerFound(Speaker),
-  TopologyReady(Topology),
+  SpeakerChange(Speaker),
+  TopologyChange(Topology),
   Error(String),
 }
 
@@ -168,7 +168,7 @@ impl System {
     self.speakers.insert(speaker_uuid.clone(), boxed_speaker);
     info!("Stored speaker with UUID: {}", speaker_uuid);
 
-    let mut events = vec![SystemEvent::SpeakerFound(speaker.clone())];
+    let mut events = vec![SystemEvent::SpeakerChange(speaker.clone())];
     
     if *is_first_speaker {
       *is_first_speaker = false;
@@ -187,7 +187,7 @@ impl System {
         debug!("Topology details: {:?}", topology);
 
         self.topology = Some(topology.clone());
-        vec![SystemEvent::TopologyReady(topology)]
+        vec![SystemEvent::TopologyChange(topology)]
       },
       Err(e) => {
         error!("Failed to retrieve topology: {:?}", e);
@@ -352,11 +352,11 @@ mod tests {
     
     // Check if any speakers were found (depends on network environment)
     let speaker_found_events: Vec<_> = events.iter()
-      .filter(|event| matches!(event, SystemEvent::SpeakerFound(_)))
+      .filter(|event| matches!(event, SystemEvent::SpeakerChange(_)))
       .collect();
     
     let topology_ready_events: Vec<_> = events.iter()
-      .filter(|event| matches!(event, SystemEvent::TopologyReady(_)))
+      .filter(|event| matches!(event, SystemEvent::TopologyChange(_)))
       .collect();
     
     let error_events: Vec<_> = events.iter()
@@ -379,8 +379,8 @@ mod tests {
       
       // If topology was successfully retrieved, it should be stored
       if !topology_ready_events.is_empty() {
-        assert!(system.has_topology(), "Topology should be stored when TopologyReady event is emitted");
-        assert!(system.topology().is_some(), "Topology should be available when TopologyReady event is emitted");
+        assert!(system.has_topology(), "Topology should be stored when TopologyChange event is emitted");
+        assert!(system.topology().is_some(), "Topology should be available when TopologyChange event is emitted");
       }
     }
     
@@ -653,9 +653,9 @@ mod tests {
     use crate::topology::types::Topology;
 
     let test_speaker = <Speaker as SpeakerFactory>::default();
-    let speaker_found = SystemEvent::SpeakerFound(test_speaker);
+    let speaker_found = SystemEvent::SpeakerChange(test_speaker);
     
-    let topology_ready = SystemEvent::TopologyReady(Topology {
+    let topology_ready = SystemEvent::TopologyChange(Topology {
       zone_groups: vec![],
       vanished_devices: None,
     });
@@ -668,8 +668,8 @@ mod tests {
     let error_debug = format!("{:?}", error_event);
     
     // Verify debug strings are not empty and contain expected content
-    assert!(speaker_debug.contains("SpeakerFound"));
-    assert!(topology_debug.contains("TopologyReady"));
+    assert!(speaker_debug.contains("SpeakerChange"));
+    assert!(topology_debug.contains("TopologyChange"));
     assert!(error_debug.contains("Error"));
     assert!(error_debug.contains("Test error"));
   }
