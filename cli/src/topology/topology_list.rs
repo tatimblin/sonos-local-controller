@@ -11,7 +11,7 @@ impl TopologyList {
 	pub fn new(topology: Topology) -> Self {
 		let mut items: Vec<TopologyItem> = Vec::new();
 
-		if topology.zone_group_count() == 0 {
+		if topology.len() == 0 {
 			return TopologyList {
 				items,
 			};

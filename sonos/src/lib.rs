@@ -1,4 +1,5 @@
 mod model;
+pub use model::PlayState;
 
 pub mod topology;
 pub use topology::{Topology, ZoneGroup, ZoneGroupMember, Satellite, VanishedDevices, VanishedDevice};
@@ -6,12 +7,11 @@ pub use topology::{Topology, ZoneGroup, ZoneGroupMember, Satellite, VanishedDevi
 mod client;
 pub use client::Client;
 
-mod system;
-pub use system::System;
-pub use system::SystemEvent;
+mod discover;
+pub use discover::{discover_speakers_iter, discover_speakers, discover_topology};
 
 pub mod speaker;
-pub use speaker::{Speaker, SpeakerFactory, SpeakerTrait};
+pub use speaker::{SpeakerController, SpeakerInfo};
 
 mod util;
 pub use util::ssdp;
@@ -19,11 +19,8 @@ pub use util::ssdp;
 mod error;
 pub use error::SonosError;
 
-mod command;
-pub use command::SpeakerCommand;
-
-#[cfg(feature = "mock")]
-pub mod testing {
-  pub use crate::speaker::mock::MockSpeaker;
-  pub use crate::speaker::mock::MockSpeakerBuilder;
-}
+//// #[cfg(feature = "mock")]
+// pub mod testing {
+//   pub use crate::speaker::mock::MockSpeaker;
+//   pub use crate::speaker::mock::MockSpeakerBuilder;
+// }

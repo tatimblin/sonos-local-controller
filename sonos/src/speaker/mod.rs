@@ -1,10 +1,8 @@
-mod speaker;
-pub use speaker::Speaker;
-pub use speaker::SpeakerFactory;
-pub use speaker::SpeakerTrait;
+mod speaker_controller;
+pub use speaker_controller::SpeakerController;
+
+mod speaker_info;
+pub use speaker_info::SpeakerInfo;
 
 mod device;
 pub use device::Device;
-
-#[cfg(feature = "mock")]
-pub mod mock;

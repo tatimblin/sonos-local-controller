@@ -1,0 +1,182 @@
+use crate::client::Client;
+use crate::error::SonosError;
+use crate::model::{Action, PlayState};
+use crate::speaker::{Device, SpeakerInfo};
+
+/// A stateless Sonos speaker controller that operates on a specific IP address
+#[derive(Debug, Clone)]
+pub struct SpeakerController {
+    client: Client,
+}
+
+impl SpeakerController {
+    /// Create a new Speaker controller bound to the specified IP address
+    pub fn new() -> Self {
+        Self {
+            client: Client::default(),
+        }
+    }
+
+    /// Create a new Speaker controller with a custom HTTP client
+    pub fn with_client(client: Client) -> Self {
+        Self {
+            client,
+        }
+    }
+
+    /// Get a reference to the HTTP client used by this speaker
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
+    /// Get detailed information about this speaker
+    pub fn get_info(&self, ip: &str) -> Result<SpeakerInfo, SonosError> {
+        let device_url = format!("http://{}:1400/xml/device_description.xml", ip);
+
+        let xml = ureq::get(&device_url)
+            .call()
+            .map_err(|_| SonosError::DeviceUnreachable)?
+            .into_string()
+            .map_err(|_| SonosError::ParseError("Failed to read response body".into()))?;
+
+        // Extract the device element from the root element
+        let root: Result<xmltree::Element, _> = xmltree::Element::parse(xml.as_bytes());
+        match root {
+            Ok(root_element) => {
+                if let Some(device_element) = root_element.get_child("device") {
+                    // Create a new XML string with just the device element
+                    let mut device_xml = Vec::new();
+                    if let Ok(_) = device_element.write(&mut device_xml) {
+                        if let Ok(device_str) = String::from_utf8(device_xml) {
+                            self.parse_device_info(ip, &device_str)
+                        } else {
+                            Err(SonosError::ParseError(
+                                "Failed to convert device XML to string".to_string(),
+                            ))
+                        }
+                    } else {
+                        Err(SonosError::ParseError(
+                            "Failed to write device element to string".to_string(),
+                        ))
+                    }
+                } else {
+                    Err(SonosError::ParseError("Missing device element".to_string()))
+                }
+            }
+            Err(e) => Err(SonosError::ParseError(format!(
+                "Failed to parse XML: {}",
+                e
+            ))),
+        }
+    }
+
+    /// Get the current playback state of this speaker
+    pub fn get_play_state(&self, ip: &str) -> Result<PlayState, SonosError> {
+        let payload = "<InstanceID>0</InstanceID>";
+        let response = self
+            .client
+            .send_action(ip, Action::GetTransportInfo, payload)?;
+
+        let transport_state = self
+            .client
+            .get_child_element_text(&response, "CurrentTransportState")?;
+
+        Ok(PlayState::from_transport_state(&transport_state))
+    }
+
+    /// Start playback on this speaker
+    pub fn play(&self, ip: &str) -> Result<(), SonosError> {
+        let payload = "<InstanceID>0</InstanceID><Speed>1</Speed>";
+        self.client.send_action(ip, Action::Play, payload)?;
+        Ok(())
+    }
+
+    /// Pause playback on this speaker
+    pub fn pause(&self, ip: &str) -> Result<(), SonosError> {
+        let payload = "<InstanceID>0</InstanceID>";
+        self.client.send_action(ip, Action::Pause, payload)?;
+        Ok(())
+    }
+
+    /// Stop playback on this speaker
+    pub fn stop(&self, ip: &str) -> Result<(), SonosError> {
+        let payload = "<InstanceID>0</InstanceID>";
+        self.client.send_action(ip, Action::Stop, payload)?;
+        Ok(())
+    }
+
+    /// Get the current volume level (0-100)
+    pub fn get_volume(&self, ip: &str) -> Result<u8, SonosError> {
+        let payload = "<InstanceID>0</InstanceID><Channel>Master</Channel>";
+        let response = self
+            .client
+            .send_action(ip, Action::GetVolume, payload)?;
+        self.parse_element_u8(&response, "CurrentVolume")
+    }
+
+    /// Set the volume level (0-100)
+    pub fn set_volume(&self, ip: &str, volume: u8) -> Result<(), SonosError> {
+        if volume > 100 {
+            return Err(SonosError::InvalidVolume(volume));
+        }
+
+        let payload = format!(
+            "<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>{}</DesiredVolume>",
+            volume
+        );
+        self.client
+            .send_action(ip, Action::SetVolume, &payload)?;
+        Ok(())
+    }
+
+    /// Adjust the volume by a relative amount (-100 to +100)
+    pub fn adjust_volume(&self, ip: &str, adjustment: i8) -> Result<(), SonosError> {
+        let payload = format!(
+            "<InstanceID>0</InstanceID><Channel>Master</Channel><Adjustment>{}</Adjustment>",
+            adjustment
+        );
+        self.client
+            .send_action(ip, Action::SetRelativeVolume, &payload)?;
+        Ok(())
+    }
+
+    /// Parse device information from XML response using serde
+    fn parse_device_info(&self, ip: &str, xml: &str) -> Result<SpeakerInfo, SonosError> {
+        // Use serde to deserialize the XML into a Device struct
+        let device_info: Result<Device, _> = serde_xml_rs::from_str(xml);
+
+        match device_info {
+            Ok(device) => {
+                // Extract the required fields from the Device struct
+                let name = device.name;
+                let room_name = device.room_name;
+                let uuid = device.udn;
+                let model = device.model_name;
+                let software_version = device
+                    .software_version
+                    .unwrap_or_else(|| "Unknown".to_string());
+
+                Ok(SpeakerInfo::with_details(
+                    ip.to_string(),
+                    name,
+                    room_name,
+                    uuid,
+                    model,
+                    software_version,
+                ))
+            }
+            Err(e) => Err(SonosError::ParseError(format!(
+                "Failed to parse device info: {}",
+                e
+            ))),
+        }
+    }
+
+    /// Parse a u8 value from an XML element
+    fn parse_element_u8(&self, element: &xmltree::Element, key: &str) -> Result<u8, SonosError> {
+        self.client
+            .get_child_element_text(element, key)?
+            .parse()
+            .map_err(|e| SonosError::ParseError(format!("Failed to parse {}: {}", key, e)))
+    }
+}

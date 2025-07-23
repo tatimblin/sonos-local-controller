@@ -1,0 +1,34 @@
+use sonos::discovery::{discover_speakers_timeout, SpeakerInfo};
+use std::time::Duration;
+
+fn main() {
+    println!("Testing discovery module...");
+    
+    // Test SpeakerInfo creation
+    let speaker_info = SpeakerInfo {
+        ip: "192.168.1.100".to_string(),
+        name: "Living Room".to_string(),
+        room_name: "Living Room".to_string(),
+        uuid: "RINCON_123456".to_string(),
+        model: "Sonos One".to_string(),
+        software_version: "56.0-76060".to_string(),
+    };
+    
+    println!("Created SpeakerInfo: {:?}", speaker_info);
+    
+    // Test discovery with short timeout (will likely fail but shouldn't panic)
+    println!("Testing discovery with 100ms timeout...");
+    match discover_speakers_timeout(Duration::from_millis(100)) {
+        Ok(speakers) => {
+            println!("Found {} speakers:", speakers.len());
+            for speaker in speakers {
+                println!("  - {} at {} ({})", speaker.name, speaker.ip, speaker.model);
+            }
+        }
+        Err(e) => {
+            println!("Discovery failed (expected in test environment): {}", e);
+        }
+    }
+    
+    println!("Discovery module test completed successfully!");
+}

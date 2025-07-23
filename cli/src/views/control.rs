@@ -87,24 +87,8 @@ impl View for ControlView {
                     }
                 }
             }
-            KeyCode::Left => {
-                // Send volume down command to locked speaker if available
-                if let Some(locked_uuid) = store.with_state(|state| state.locked_speaker_uuid.clone()) {
-                    store.dispatch(AppAction::SendSpeakerCommand {
-                        uuid: locked_uuid,
-                        command: sonos::SpeakerCommand::AdjustVolume(-4),
-                    });
-                }
-            }
-            KeyCode::Right => {
-                // Send volume up command to locked speaker if available
-                if let Some(locked_uuid) = store.with_state(|state| state.locked_speaker_uuid.clone()) {
-                    store.dispatch(AppAction::SendSpeakerCommand {
-                        uuid: locked_uuid,
-                        command: sonos::SpeakerCommand::AdjustVolume(4),
-                    });
-                }
-            }
+            KeyCode::Left => {}
+            KeyCode::Right => {}
             KeyCode::Char(' ') => {
                 // Toggle lock for the currently highlighted item if it's a speaker
                 if let Some(selected_item) = self.list_widget.selected() {
@@ -113,27 +97,8 @@ impl View for ControlView {
                     }
                 }
             }
-            KeyCode::Char('p') => {
-                // Send play command to locked speaker if available
-                if let Some(locked_uuid) = store.with_state(|state| state.locked_speaker_uuid.clone()) {
-                    store.dispatch(AppAction::SendSpeakerCommand {
-                        uuid: locked_uuid,
-                        command: sonos::SpeakerCommand::Play,
-                    });
-                }
-            }
-            KeyCode::Char('s') => {
-                // Send pause command to locked speaker if available
-                if let Some(locked_uuid) = store.with_state(|state| state.locked_speaker_uuid.clone()) {
-                    store.dispatch(AppAction::SendSpeakerCommand {
-                        uuid: locked_uuid,
-                        command: sonos::SpeakerCommand::Pause,
-                    });
-                }
-            }
-            _ => {
-                // Let unhandled keys (like 'q') pass through to the main app
-            }
+            KeyCode::Char('p') => {}
+            _ => {}
         }
         Ok(())
     }

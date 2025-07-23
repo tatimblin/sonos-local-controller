@@ -42,14 +42,17 @@ impl Service {
   }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Action {
   Play,
   Pause,
+  Stop,
   GetVolume,
   SetVolume,
   SetRelativeVolume,
   GetZoneGroupState,
+  GetTransportInfo,
+  SetAVTransportURI,
 }
 
 impl Action {
@@ -65,10 +68,13 @@ impl Action {
     match self {
       Action::Play => "Play",
       Action::Pause => "Pause",
+      Action::Stop => "Stop",
       Action::GetVolume => "GetVolume",
       Action::SetVolume => "SetVolume",
       Action::SetRelativeVolume => "SetRelativeVolume",
       Action::GetZoneGroupState => "GetZoneGroupState",
+      Action::GetTransportInfo => "GetTransportInfo",
+      Action::SetAVTransportURI => "SetAVTransportURI",
     }
   }
 
@@ -76,6 +82,9 @@ impl Action {
     match self {
       Action::Play
       | Action::Pause
+      | Action::Stop
+      | Action::GetTransportInfo
+      | Action::SetAVTransportURI
       => Service::av_transport(),
       Action::GetVolume
       | Action::SetVolume
@@ -87,4 +96,28 @@ impl Action {
   }
 }
 
+/// Represents the current playback state of a Sonos speaker
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlayState {
+  /// Speaker is currently playing audio
+  Playing,
+  /// Speaker is paused
+  Paused,
+  /// Speaker is stopped
+  Stopped,
+  /// Speaker is transitioning between states
+  Transitioning,
+}
 
+impl PlayState {
+  /// Parse PlayState from Sonos transport state string
+  pub fn from_transport_state(state: &str) -> Self {
+    match state {
+      "PLAYING" => PlayState::Playing,
+      "PAUSED_PLAYBACK" => PlayState::Paused,
+      "STOPPED" => PlayState::Stopped,
+      "TRANSITIONING" => PlayState::Transitioning,
+      _ => PlayState::Stopped, // Default to stopped for unknown states
+    }
+  }
+}
