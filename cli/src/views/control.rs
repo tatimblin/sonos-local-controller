@@ -3,6 +3,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout};
 use ratatui::text::Text;
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+use sonos::SpeakerController;
 use std::io;
 use std::sync::Arc;
 
@@ -25,11 +26,9 @@ impl ControlView {
             if let Some(topology) = &state.topology {
                 // Create topology list from actual topology data
                 SpeakerList::new_with(topology, |item| match item {
-                    TopologyItem::Group { uuid, name } => (format!("Group: {name}"), uuid.clone()),
-                    TopologyItem::Speaker { uuid } => (format!("  Speaker: {uuid}"), uuid.clone()),
-                    TopologyItem::Satellite { uuid } => {
-                        (format!("  Satellite: {uuid}"), uuid.clone())
-                    }
+                    TopologyItem::Group { name, .. } => (format!("Group: {name}"), name.clone()),
+                    TopologyItem::Speaker { uuid, .. } => (format!("  Speaker: {uuid}"), uuid.clone()),
+                    TopologyItem::Satellite { uuid } => (format!("  Satellite: {uuid}"), uuid.clone())
                 })
             } else {
                 // Create empty topology list for empty state
@@ -73,8 +72,8 @@ impl View for ControlView {
                 self.list_widget.previous();
                 // If we navigated to a speaker, set it as active
                 if let Some(selected_item) = self.list_widget.selected() {
-                    if let TopologyItem::Speaker { uuid } = selected_item {
-                        store.dispatch(AppAction::SetActiveSpeaker(uuid.clone()));
+                    if let TopologyItem::Speaker { ip, .. } = selected_item {
+                        store.dispatch(AppAction::SetActiveSpeaker(ip.clone()));
                     }
                 }
             }
@@ -82,18 +81,32 @@ impl View for ControlView {
                 self.list_widget.next();
                 // If we navigated to a speaker, set it as active
                 if let Some(selected_item) = self.list_widget.selected() {
-                    if let TopologyItem::Speaker { uuid } = selected_item {
-                        store.dispatch(AppAction::SetActiveSpeaker(uuid.clone()));
+                    if let TopologyItem::Speaker { ip, .. } = selected_item {
+                        store.dispatch(AppAction::SetActiveSpeaker(ip.clone()));
                     }
                 }
             }
-            KeyCode::Left => {}
-            KeyCode::Right => {}
+            KeyCode::Left => {
+                store.with_state(|state| {
+                    if let Some(ref uuid) = state.active_speaker_uuid {
+                        let controller = SpeakerController::new();
+                        let _ = controller.adjust_volume(uuid, -4);
+                    }
+                });
+            }
+            KeyCode::Right => {
+                store.with_state(|state| {
+                    if let Some(ref uuid) = state.active_speaker_uuid {
+                        let controller = SpeakerController::new();
+                        let _ = controller.adjust_volume(uuid, 4);
+                    }
+                });
+            }
             KeyCode::Char(' ') => {
                 // Toggle lock for the currently highlighted item if it's a speaker
                 if let Some(selected_item) = self.list_widget.selected() {
-                    if let TopologyItem::Speaker { uuid } = selected_item {
-                        store.dispatch(AppAction::ToggleSpeakerLock(uuid.clone()));
+                    if let TopologyItem::Speaker { ip, .. } = selected_item {
+                        store.dispatch(AppAction::ToggleSpeakerLock(ip.clone()));
                     }
                 }
             }

@@ -40,11 +40,12 @@ impl ZoneGroup {
 }
 
 impl ZoneGroupMember {
-    pub fn get_ip(&self) -> Option<String> {
+    pub fn get_ip(&self) -> String {
         self.location // (e.g., "http://192.168.4.65:1400/xml/device_description.xml")
             .strip_prefix("http://")
             .and_then(|url| url.split(':').next())
             .map(|ip| ip.to_string())
+            .unwrap_or_else(|| "unknown".to_string())
     }
 }
 

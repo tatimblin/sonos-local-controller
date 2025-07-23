@@ -45,8 +45,8 @@ impl SpeakerList {
       .enumerate()
       .map(|(_i, item)| {
         let display_text = match item {
-          TopologyItem::Group { uuid: _, name } => format!("Group: {name}"),
-          TopologyItem::Speaker { uuid } => format!("  Speaker: {uuid}"),
+          TopologyItem::Group { name, .. } => format!("Group: {name}"),
+          TopologyItem::Speaker { uuid, .. } => format!("  Speaker: {uuid}"),
           TopologyItem::Satellite { uuid } => format!("  Satellite: {uuid}"),
         };
         
