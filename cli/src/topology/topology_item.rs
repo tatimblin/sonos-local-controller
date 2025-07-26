@@ -3,7 +3,11 @@ use sonos::{Satellite, ZoneGroup, ZoneGroupMember};
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopologyItem {
     Group { uuid: String, name: String },
-    Speaker { ip: String, uuid: String },
+    Speaker {
+			ip: String,
+			name: String,
+			uuid: String
+		},
     Satellite { uuid: String },
 }
 
@@ -25,6 +29,7 @@ impl TopologyItem {
     pub fn from_speaker(speaker: &ZoneGroupMember) -> Self {
         TopologyItem::Speaker {
             ip: speaker.get_ip(),
+						name: speaker.location.to_string(),
             uuid: speaker.uuid.to_string(),
         }
     }

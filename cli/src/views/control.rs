@@ -26,9 +26,9 @@ impl ControlView {
             if let Some(topology) = &state.topology {
                 // Create topology list from actual topology data
                 SpeakerList::new_with(topology, |item| match item {
-                    TopologyItem::Group { name, .. } => (format!("Group: {name}"), name.clone()),
-                    TopologyItem::Speaker { uuid, .. } => (format!("  Speaker: {uuid}"), uuid.clone()),
-                    TopologyItem::Satellite { uuid } => (format!("  Satellite: {uuid}"), uuid.clone())
+                    TopologyItem::Group { name, .. } => format!("Group: {name}"),
+                    TopologyItem::Speaker { name, .. } => format!("  Speaker: {name}"),
+                    TopologyItem::Satellite { uuid } => format!("  Satellite: {uuid}"),
                 })
             } else {
                 // Create empty topology list for empty state
@@ -61,9 +61,7 @@ impl View for ControlView {
         let body_paragraph = Paragraph::new(body).alignment(Alignment::Center);
         frame.render_widget(body_paragraph, chunks[0]);
 
-        self.store.with_state(|state| {
-            self.list_widget.draw(frame, chunks[1], state);
-        });
+        self.list_widget.draw(frame, chunks[1]);
     }
 
     fn handle_input(&mut self, key_event: KeyEvent, store: &Store) -> io::Result<()> {
