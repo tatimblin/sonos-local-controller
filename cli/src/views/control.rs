@@ -24,11 +24,7 @@ impl ControlView {
     pub fn new(store: Arc<Store>) -> Self {
         let list_widget = store.with_state(|state| {
             if let Some(topology) = &state.topology {
-                SpeakerList::new_with(topology, |item| match item {
-                    TopologyItem::Group { name, .. } => format!("▶ {name}"),
-                    TopologyItem::Speaker { name, is_last, .. } => format!("  ├─ {name} {is_last}"),
-                    TopologyItem::Satellite { uuid, .. } => format!("  Satellite: {uuid}"),
-                })
+                SpeakerList::new(topology)
             } else {
                 let empty_topology = TopologyList { items: vec![] };
                 SpeakerList::new(&empty_topology)

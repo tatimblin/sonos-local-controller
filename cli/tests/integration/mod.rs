@@ -4,3 +4,4 @@ pub mod command_flow_tests;
 pub mod error_scenario_tests;
 pub mod network_scenario_tests;
 pub mod comprehensive_system_tests;
+pub mod control_view_integration_tests;

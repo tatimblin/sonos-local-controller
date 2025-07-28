@@ -1,4 +1,9 @@
-use sonos::{Satellite, SpeakerInfo, ZoneGroup, ZoneGroupMember};
+use sonos::{Satellite, ZoneGroup, ZoneGroupMember};
+use ratatui::{
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::ListItem,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopologyItem {
@@ -87,6 +92,36 @@ impl TopologyItem {
             }
         }
     }
+
+    /// Converts this TopologyItem to a ListItem for use in SelectableList
+    pub fn to_list_item(&self) -> ListItem<'static> {
+        match self {
+            TopologyItem::Group { name, .. } => {
+                let line = Line::from(vec![
+                    Span::styled("▶ ", Style::default().fg(Color::Green)),
+                    Span::raw(name.clone()),
+                ]);
+                ListItem::new(line)
+            }
+            TopologyItem::Speaker { name, is_last, .. } => {
+                let prefix = if *is_last { "└─ " } else { "├─ " };
+                let line = Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(prefix, Style::default().fg(Color::Blue)),
+                    Span::raw(name.clone()),
+                ]);
+                ListItem::new(line)
+            }
+            TopologyItem::Satellite { uuid, .. } => {
+                let line = Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled("Satellite: ", Style::default().fg(Color::Yellow)),
+                    Span::raw(uuid.clone()),
+                ]);
+                ListItem::new(line)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -162,5 +197,56 @@ mod tests {
         let satellite_item = TopologyItem::from_satellite(&satellite);
 
         assert_eq!(satellite.uuid, satellite_item.get_uuid());
+    }
+
+    #[test]
+    fn test_to_list_item_group() {
+        let group = TopologyItem::Group {
+            ip: "192.168.1.100".to_string(),
+            name: "Living Room".to_string(),
+            uuid: "RINCON_123456".to_string(),
+            is_last: false,
+        };
+
+        let list_item = group.to_list_item();
+        // Verify the ListItem was created successfully
+        drop(list_item);
+    }
+
+    #[test]
+    fn test_to_list_item_speaker() {
+        let speaker = TopologyItem::Speaker {
+            ip: "192.168.1.101".to_string(),
+            name: "Kitchen".to_string(),
+            uuid: "RINCON_789012".to_string(),
+            is_last: false,
+        };
+
+        let list_item = speaker.to_list_item();
+        drop(list_item);
+    }
+
+    #[test]
+    fn test_to_list_item_speaker_last() {
+        let speaker = TopologyItem::Speaker {
+            ip: "192.168.1.101".to_string(),
+            name: "Kitchen".to_string(),
+            uuid: "RINCON_789012".to_string(),
+            is_last: true,
+        };
+
+        let list_item = speaker.to_list_item();
+        drop(list_item);
+    }
+
+    #[test]
+    fn test_to_list_item_satellite() {
+        let satellite = TopologyItem::Satellite {
+            uuid: "RINCON_SAT123".to_string(),
+            is_last: false,
+        };
+
+        let list_item = satellite.to_list_item();
+        drop(list_item);
     }
 }
