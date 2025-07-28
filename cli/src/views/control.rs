@@ -26,8 +26,8 @@ impl ControlView {
             if let Some(topology) = &state.topology {
                 SpeakerList::new_with(topology, |item| match item {
                     TopologyItem::Group { name, .. } => format!("▶ {name}"),
-                    TopologyItem::Speaker { name, .. } => format!("  ├─ {name}"),
-                    TopologyItem::Satellite { uuid } => format!("  Satellite: {uuid}"),
+                    TopologyItem::Speaker { name, is_last, .. } => format!("  ├─ {name} {is_last}"),
+                    TopologyItem::Satellite { uuid, .. } => format!("  Satellite: {uuid}"),
                 })
             } else {
                 let empty_topology = TopologyList { items: vec![] };

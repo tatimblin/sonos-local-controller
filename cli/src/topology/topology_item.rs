@@ -6,14 +6,17 @@ pub enum TopologyItem {
         ip: String,
         name: String,
         uuid: String,
+        is_last: bool,
     },
     Speaker {
         ip: String,
         name: String,
         uuid: String,
+        is_last: bool,
     },
     Satellite {
         uuid: String,
+        is_last: bool,
     },
 }
 
@@ -30,6 +33,7 @@ impl TopologyItem {
             ip: group.get_coordinator().get_ip(),
             uuid: group.id.to_string(),
             name: group.get_name().to_string(),
+            is_last: false,
         }
     }
 
@@ -38,12 +42,14 @@ impl TopologyItem {
             ip: speaker.get_ip(),
             name: speaker.zone_name.to_string(),
             uuid: speaker.uuid.to_string(),
+            is_last: false,
         }
     }
 
     pub fn from_satellite(satellite: &Satellite) -> Self {
         TopologyItem::Satellite {
             uuid: satellite.uuid.to_string(),
+            is_last: false,
         }
     }
 
@@ -59,7 +65,26 @@ impl TopologyItem {
         match self {
             TopologyItem::Group { uuid, .. }
             | TopologyItem::Speaker { uuid, .. }
-            | TopologyItem::Satellite { uuid } => uuid,
+            | TopologyItem::Satellite { uuid, .. } => uuid,
+        }
+    }
+
+    pub fn set_is_last(&mut self, is_last: bool) {
+        match self {
+            TopologyItem::Group {
+                is_last: ref mut last,
+                ..
+            }
+            | TopologyItem::Speaker {
+                is_last: ref mut last,
+                ..
+            }
+            | TopologyItem::Satellite {
+                is_last: ref mut last,
+                ..
+            } => {
+                *last = is_last;
+            }
         }
     }
 }

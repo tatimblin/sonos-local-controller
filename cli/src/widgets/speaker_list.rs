@@ -23,7 +23,7 @@ impl SpeakerList {
       .map(|item| match item {
         TopologyItem::Group { name, .. } => format!("Group: {name}"),
         TopologyItem::Speaker { name, .. } => format!("Speaker: {name}"),
-        TopologyItem::Satellite { uuid } => format!("Satellite: {uuid}"),
+        TopologyItem::Satellite { uuid, .. } => format!("Satellite: {uuid}"),
       })
       .collect();
 

@@ -25,6 +25,11 @@ impl TopologyList {
 				let speaker_item = TopologyItem::from_speaker(&speaker);
 				items.push(speaker_item);
 			}
+
+      // Set is_last to true for the last item
+      if let Some(last_item) = items.last_mut() {
+        last_item.set_is_last(true);
+      }
 		}
 
 		TopologyList { items }
