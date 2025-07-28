@@ -1,14 +1,20 @@
-use sonos::{Satellite, ZoneGroup, ZoneGroupMember};
+use sonos::{Satellite, SpeakerInfo, ZoneGroup, ZoneGroupMember};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopologyItem {
-    Group { uuid: String, name: String },
+    Group {
+        ip: String,
+        name: String,
+        uuid: String,
+    },
     Speaker {
-			ip: String,
-			name: String,
-			uuid: String
-		},
-    Satellite { uuid: String },
+        ip: String,
+        name: String,
+        uuid: String,
+    },
+    Satellite {
+        uuid: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -21,6 +27,7 @@ pub enum TopologyType {
 impl TopologyItem {
     pub fn from_group(group: &ZoneGroup) -> Self {
         TopologyItem::Group {
+            ip: group.get_coordinator().get_ip(),
             uuid: group.id.to_string(),
             name: group.get_name().to_string(),
         }
@@ -29,7 +36,7 @@ impl TopologyItem {
     pub fn from_speaker(speaker: &ZoneGroupMember) -> Self {
         TopologyItem::Speaker {
             ip: speaker.get_ip(),
-						name: speaker.location.to_string(),
+            name: speaker.zone_name.to_string(),
             uuid: speaker.uuid.to_string(),
         }
     }

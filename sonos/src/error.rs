@@ -9,6 +9,7 @@ pub enum SonosError {
   NetworkTimeout,
   NetworkError(String),
   InvalidVolume(u8),
+  NotCoordinator(String)
 }
 
 impl fmt::Display for SonosError {
@@ -21,6 +22,7 @@ impl fmt::Display for SonosError {
       SonosError::NetworkTimeout => write!(f, "Network request timed out"),
       SonosError::NetworkError(msg) => write!(f, "Network error: {}", msg),
       SonosError::InvalidVolume(volume) => write!(f, "Invalid volume level: {} (must be 0-100)", volume),
+      SonosError::NotCoordinator(ip) => write!(f, "Device ({}) is not the zone coordinator", ip)
     }
   }
 }

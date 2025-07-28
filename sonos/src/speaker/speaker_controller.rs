@@ -86,23 +86,42 @@ impl SpeakerController {
 
     /// Start playback on this speaker
     pub fn play(&self, ip: &str) -> Result<(), SonosError> {
-        let payload = "<InstanceID>0</InstanceID><Speed>1</Speed>";
-        self.client.send_action(ip, Action::Play, payload)?;
-        Ok(())
+      if !self.is_coordinator(ip)? {
+        return Err(SonosError::NotCoordinator(ip.to_string()));
+      }
+
+      let payload = "<InstanceID>0</InstanceID><Speed>1</Speed>";
+      self.client.send_action(ip, Action::Play, payload)?;
+      Ok(())
     }
 
     /// Pause playback on this speaker
     pub fn pause(&self, ip: &str) -> Result<(), SonosError> {
-        let payload = "<InstanceID>0</InstanceID>";
-        self.client.send_action(ip, Action::Pause, payload)?;
-        Ok(())
+      if !self.is_coordinator(ip)? {
+        return Err(SonosError::NotCoordinator(ip.to_string()));
+      }
+
+      let payload = "<InstanceID>0</InstanceID>";
+      self.client.send_action(ip, Action::Pause, payload)?;
+      Ok(())
     }
 
     /// Stop playback on this speaker
     pub fn stop(&self, ip: &str) -> Result<(), SonosError> {
-        let payload = "<InstanceID>0</InstanceID>";
-        self.client.send_action(ip, Action::Stop, payload)?;
-        Ok(())
+      if !self.is_coordinator(ip)? {
+        return Err(SonosError::NotCoordinator(ip.to_string()));
+      }
+
+      let payload = "<InstanceID>0</InstanceID>";
+      self.client.send_action(ip, Action::Stop, payload)?;
+      Ok(())
+    }
+
+    pub fn toggle_play_state(&self, ip: &str) -> Result<(), SonosError> {
+      match self.get_play_state(ip)? {
+        PlayState::Playing | PlayState::Transitioning => self.pause(ip),
+        PlayState::Paused | PlayState::Stopped => self.play(ip),
+      }
     }
 
     /// Get the current volume level (0-100)
@@ -138,6 +157,15 @@ impl SpeakerController {
         self.client
             .send_action(ip, Action::SetRelativeVolume, &payload)?;
         Ok(())
+    }
+
+    fn is_coordinator(&self, ip: &str) -> Result<bool, SonosError> {
+      let payload = "<InstanceID>0</InstanceID>";
+      let response = self.client.send_action(ip, Action::GetPositionInfo, payload)?;
+
+      let rel_time = self.client.get_child_element_text(&response, "RelTime")?;
+
+      Ok(!rel_time.is_empty())
     }
 
     /// Parse device information from XML response using serde

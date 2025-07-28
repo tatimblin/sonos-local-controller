@@ -24,14 +24,12 @@ impl ControlView {
     pub fn new(store: Arc<Store>) -> Self {
         let list_widget = store.with_state(|state| {
             if let Some(topology) = &state.topology {
-                // Create topology list from actual topology data
                 SpeakerList::new_with(topology, |item| match item {
-                    TopologyItem::Group { name, .. } => format!("Group: {name}"),
-                    TopologyItem::Speaker { name, .. } => format!("  Speaker: {name}"),
+                    TopologyItem::Group { name, .. } => format!("▶ {name}"),
+                    TopologyItem::Speaker { name, .. } => format!("  ├─ {name}"),
                     TopologyItem::Satellite { uuid } => format!("  Satellite: {uuid}"),
                 })
             } else {
-                // Create empty topology list for empty state
                 let empty_topology = TopologyList { items: vec![] };
                 SpeakerList::new(&empty_topology)
             }
@@ -42,7 +40,7 @@ impl ControlView {
 
     fn get_selected_list(&self) -> String {
         self.store.with_state(|state| {
-            if let Some(locked_uuid) = &state.locked_speaker_uuid {
+            if let Some(locked_uuid) = &state.selected_speaker_ip {
                 locked_uuid.clone()
             } else {
                 "No speaker locked".to_string()
@@ -68,47 +66,82 @@ impl View for ControlView {
         match key_event.code {
             KeyCode::Up => {
                 self.list_widget.previous();
-                // If we navigated to a speaker, set it as active
-                if let Some(selected_item) = self.list_widget.selected() {
-                    if let TopologyItem::Speaker { ip, .. } = selected_item {
-                        store.dispatch(AppAction::SetActiveSpeaker(ip.clone()));
-                    }
+                if let Some(item) = self.list_widget.selected() {
+                    store.dispatch(AppAction::SetHighlight(item.clone()));
                 }
             }
             KeyCode::Down => {
                 self.list_widget.next();
-                // If we navigated to a speaker, set it as active
-                if let Some(selected_item) = self.list_widget.selected() {
-                    if let TopologyItem::Speaker { ip, .. } = selected_item {
-                        store.dispatch(AppAction::SetActiveSpeaker(ip.clone()));
-                    }
+                if let Some(item) = self.list_widget.selected() {
+                    store.dispatch(AppAction::SetHighlight(item.clone()));
                 }
             }
             KeyCode::Left => {
                 store.with_state(|state| {
-                    if let Some(ref uuid) = state.active_speaker_uuid {
-                        let controller = SpeakerController::new();
-                        let _ = controller.adjust_volume(uuid, -4);
+                    if let Some(ref topology_item) = state.highlight {
+                        match topology_item {
+                            TopologyItem::Speaker { ip, .. } => {
+                                let controller = SpeakerController::new();
+                                let _ = controller.adjust_volume(ip, -4);
+                            }
+                            TopologyItem::Group { ip, .. } => {
+                                let controller = SpeakerController::new();
+                                let _ = controller.adjust_volume(ip, -4);
+                            }
+                            TopologyItem::Satellite { .. } => {
+                                // Satellites don't support direct volume control
+                            }
+                        }
                     }
                 });
             }
             KeyCode::Right => {
                 store.with_state(|state| {
-                    if let Some(ref uuid) = state.active_speaker_uuid {
+                    if let Some(ref topology_item) = state.highlight {
                         let controller = SpeakerController::new();
-                        let _ = controller.adjust_volume(uuid, 4);
+                        match topology_item {
+                            TopologyItem::Speaker { ip, .. } => {
+                                let _ = controller.adjust_volume(ip, 4);
+                            }
+                            TopologyItem::Group { ip, .. } => {
+                                // Use coordinator IP for group volume control
+                                let _ = controller.adjust_volume(ip, 4);
+                            }
+                            TopologyItem::Satellite { .. } => {
+                                // Satellites don't support direct volume control
+                            }
+                        }
                     }
                 });
             }
             KeyCode::Char(' ') => {
                 // Toggle lock for the currently highlighted item if it's a speaker
                 if let Some(selected_item) = self.list_widget.selected() {
-                    if let TopologyItem::Speaker { ip, .. } = selected_item {
-                        store.dispatch(AppAction::ToggleSpeakerLock(ip.clone()));
+                    match selected_item {
+                        TopologyItem::Speaker { ip, .. } => {
+                            store.dispatch(AppAction::SetSelectSpeaker(ip.clone()));
+                        }
+                        TopologyItem::Group { .. } => {
+                            // TODO: Handle group toggle
+                        }
+                        TopologyItem::Satellite { .. } => {
+                            // TODO: Handle satellite toggle
+                        }
                     }
                 }
             }
-            KeyCode::Char('p') => {}
+            KeyCode::Char('p') => {
+                if let Some(selected_item) = self.list_widget.selected() {
+                    match selected_item {
+                        TopologyItem::Group { ip, .. } => {
+                            let controller = SpeakerController::new();
+                            let _ = controller.toggle_play_state(ip);
+                        }
+                        TopologyItem::Speaker { .. } => todo!(),
+                        TopologyItem::Satellite { .. } => todo!(),
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())

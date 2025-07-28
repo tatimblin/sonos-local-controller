@@ -53,6 +53,7 @@ pub enum Action {
   GetZoneGroupState,
   GetTransportInfo,
   SetAVTransportURI,
+  GetPositionInfo,
 }
 
 impl Action {
@@ -75,6 +76,7 @@ impl Action {
       Action::GetZoneGroupState => "GetZoneGroupState",
       Action::GetTransportInfo => "GetTransportInfo",
       Action::SetAVTransportURI => "SetAVTransportURI",
+      Action::GetPositionInfo => "GetPositionInfo",
     }
   }
 
@@ -85,6 +87,7 @@ impl Action {
       | Action::Stop
       | Action::GetTransportInfo
       | Action::SetAVTransportURI
+      | Action::GetPositionInfo
       => Service::av_transport(),
       Action::GetVolume
       | Action::SetVolume

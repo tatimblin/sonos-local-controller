@@ -37,7 +37,7 @@ impl SelectableList {
         let list = List::new(list_items)
             .block(Block::default().title(self.title.clone()))
             .highlight_style(Style::new().reversed())
-            .highlight_symbol(">> ");
+            .highlight_symbol("≡ ");
 
         frame.render_stateful_widget(list, area, &mut self.state);
     }

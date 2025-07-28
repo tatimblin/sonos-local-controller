@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{topology::topology_list::TopologyList, views::ViewType};
+use crate::{topology::{topology_item::TopologyItem, topology_list::TopologyList}, views::ViewType};
 
 use super::reducers::{app_reducer, AppAction};
 
@@ -16,8 +16,8 @@ pub struct AppState {
     pub view: ViewType,
     pub status_message: String,
     pub topology: Option<TopologyList>,
-    pub active_speaker_uuid: Option<String>,
-    pub locked_speaker_uuid: Option<String>,
+    pub highlight: Option<TopologyItem>,
+    pub selected_speaker_ip: Option<String>,
 }
 
 impl Default for AppState {
@@ -26,23 +26,23 @@ impl Default for AppState {
             view: ViewType::Startup,
             status_message: "loading...".to_owned(),
             topology: None,
-            active_speaker_uuid: None,
-            locked_speaker_uuid: None,
+            highlight: None,
+            selected_speaker_ip: None,
         }
     }
 }
 
 impl AppState {
-    pub fn is_speaker_active(&self, uuid: &str) -> bool {
-        self.active_speaker_uuid.as_ref().map(|s| s.as_str()) == Some(uuid)
+    pub fn is_speaker_highlighted(&self, uuid: &str) -> bool {
+        self.highlight.as_ref().map(|s| s.get_uuid()) == Some(uuid)
     }
 
-    pub fn is_speaker_locked(&self, uuid: &str) -> bool {
-        self.locked_speaker_uuid.as_ref().map(|s| s.as_str()) == Some(uuid)
+    pub fn is_speaker_selected(&self, uuid: &str) -> bool {
+        self.selected_speaker_ip.as_ref().map(|s| s.as_str()) == Some(uuid)
     }
 
     pub fn get_speaker_display_state(&self, uuid: &str) -> SpeakerDisplayState {
-        match (self.is_speaker_active(uuid), self.is_speaker_locked(uuid)) {
+        match (self.is_speaker_highlighted(uuid), self.is_speaker_selected(uuid)) {
             (true, true) => SpeakerDisplayState::ActiveAndLocked,
             (true, false) => SpeakerDisplayState::Active,
             (false, true) => SpeakerDisplayState::Locked,

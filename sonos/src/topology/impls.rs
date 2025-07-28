@@ -28,10 +28,11 @@ impl ZoneGroup {
             .unwrap_or("Unknown Group")
     }
 
-    pub fn get_coordinator(&self) -> Option<&ZoneGroupMember> {
+    pub fn get_coordinator(&self) -> &ZoneGroupMember {
         self.members
             .iter()
             .find(|member| member.uuid == self.coordinator)
+            .expect("Coordinator must exist in zone group")
     }
 
     pub fn get_speakers(&self) -> &Vec<ZoneGroupMember> {
