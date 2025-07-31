@@ -3,7 +3,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::ListItem,
 };
-use sonos::{PlayState, Satellite, ZoneGroup, ZoneGroupMember};
+use sonos::{PlayState, Satellite, SpeakerController, ZoneGroup, ZoneGroupMember};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopologyItem {
@@ -36,12 +36,16 @@ pub enum TopologyType {
 
 impl TopologyItem {
     pub fn from_group(group: &ZoneGroup) -> Self {
+        let ip = group.get_coordinator().get_ip();
+        let controller = SpeakerController::new();
+        let play_state = controller.get_play_state(&ip).unwrap_or(PlayState::Stopped);
+
         TopologyItem::Group {
-            ip: group.get_coordinator().get_ip(),
+            ip,
             uuid: group.id.to_string(),
             name: group.get_name().to_string(),
             is_last: false,
-            play_state: PlayState::Stopped,
+            play_state,
         }
     }
 
