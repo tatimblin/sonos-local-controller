@@ -11,7 +11,7 @@ impl TopologyList {
 	pub fn new(topology: Topology) -> Self {
 		let mut items: Vec<TopologyItem> = Vec::new();
 
-		if topology.zone_group_count() == 0 {
+		if topology.len() == 0 {
 			return TopologyList {
 				items,
 			};
@@ -25,6 +25,11 @@ impl TopologyList {
 				let speaker_item = TopologyItem::from_speaker(&speaker);
 				items.push(speaker_item);
 			}
+
+      // Set is_last to true for the last item
+      if let Some(last_item) = items.last_mut() {
+        last_item.set_is_last(true);
+      }
 		}
 
 		TopologyList { items }

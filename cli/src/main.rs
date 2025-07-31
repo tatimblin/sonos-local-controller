@@ -13,9 +13,8 @@ use std::sync::Arc;
 
 use crate::state::store::Store;
 
-use crate::hooks::use_speakers::use_speakers;
+use crate::hooks::{use_speakers, use_topology};
 use crate::views::{control::ControlView, startup::StartupView, View, ViewType};
-use sonos::System;
 
 pub struct App {
     store: Arc<Store>,
@@ -26,8 +25,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> io::Result<Self> {
-        let system = System::new()?;
-        let store = Arc::new(Store::new_with_system(system));
+        let store = Arc::new(Store::new());
 
         Ok(Self {
             store: store.clone(),
@@ -57,22 +55,27 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
-        // Start discovery using the system already stored in the store
-        use_speakers(&self.store, || {
-            terminal
-                .draw(|frame| self.current_view.render(frame))
-                .map(|_| ())
-        })?;
+      use_topology(&self.store, || {
+        terminal
+            .draw(|frame| self.current_view.render(frame))
+            .map(|_| ())
+      })?;
 
-        while !self.exit {
-            self.update_current_view();
-            terminal.draw(|frame| self.current_view.render(frame))?;
+      use_speakers(&self.store, || {
+        terminal
+            .draw(|frame| self.current_view.render(frame))
+            .map(|_| ())
+      })?;
 
-            if let event::Event::Key(key_event) = event::read()? {
-                self.handle_input(key_event)?;
-            }
-        }
-        Ok(())
+      while !self.exit {
+          self.update_current_view();
+          terminal.draw(|frame| self.current_view.render(frame))?;
+
+          if let event::Event::Key(key_event) = event::read()? {
+              self.handle_input(key_event)?;
+          }
+      }
+      Ok(())
     }
 
     fn handle_input(&mut self, key_event: KeyEvent) -> io::Result<()> {

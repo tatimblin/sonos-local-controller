@@ -8,12 +8,12 @@ use ratatui::{
 #[derive(Clone)]
 pub struct SelectableList {
     title: String,
-    items: Vec<String>,
+    items: Vec<ListItem<'static>>,
     state: ListState,
 }
 
 impl SelectableList {
-    pub fn new(title: &str, items: Vec<String>) -> Self {
+    pub fn new(title: &str, items: Vec<ListItem<'static>>) -> Self {
         let mut state = ListState::default();
         // Only select first item if list is not empty
         if !items.is_empty() {
@@ -28,16 +28,10 @@ impl SelectableList {
     }
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
-        let list_items: Vec<ListItem> = self
-            .items
-            .iter()
-            .map(|s| ListItem::new(s.as_str()))
-            .collect();
-
-        let list = List::new(list_items)
+        let list = List::new(self.items.clone())
             .block(Block::default().title(self.title.clone()))
             .highlight_style(Style::new().reversed())
-            .highlight_symbol(">> ");
+            .highlight_symbol("≡ ");
 
         frame.render_stateful_widget(list, area, &mut self.state);
     }
@@ -91,9 +85,9 @@ mod tests {
         SelectableList::new(
             "Test List",
             vec![
-                "Item 1".to_string(),
-                "Item 2".to_string(),
-                "Item 3".to_string(),
+                ListItem::new("Item 1"),
+                ListItem::new("Item 2"),
+                ListItem::new("Item 3"),
             ],
         )
     }
@@ -184,5 +178,82 @@ mod tests {
                 assert_eq!(list.items.len(), 3);
             })
             .unwrap();
+    }
+
+    #[test]
+    fn test_list_item_creation() {
+        let items = vec![
+            ListItem::new("First Item"),
+            ListItem::new("Second Item"),
+            ListItem::new("Third Item"),
+        ];
+        let list = SelectableList::new("ListItem Test", items);
+        
+        assert_eq!(list.title, "ListItem Test");
+        assert_eq!(list.items.len(), 3);
+        assert_eq!(list.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_list_item_with_styled_content() {
+        use ratatui::style::{Color, Style};
+        use ratatui::text::{Line, Span};
+        
+        let styled_item = ListItem::new(Line::from(vec![
+            Span::styled("Styled", Style::default().fg(Color::Red)),
+            Span::raw(" Item"),
+        ]));
+        
+        let items = vec![
+            ListItem::new("Normal Item"),
+            styled_item,
+        ];
+        
+        let list = SelectableList::new("Styled Test", items);
+        assert_eq!(list.items.len(), 2);
+        assert_eq!(list.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_navigation_with_list_items() {
+        let items = vec![
+            ListItem::new("Alpha"),
+            ListItem::new("Beta"),
+            ListItem::new("Gamma"),
+            ListItem::new("Delta"),
+        ];
+        let mut list = SelectableList::new("Navigation Test", items);
+        
+        // Test forward navigation
+        assert_eq!(list.selected(), Some(0));
+        list.next();
+        assert_eq!(list.selected(), Some(1));
+        list.next();
+        assert_eq!(list.selected(), Some(2));
+        list.next();
+        assert_eq!(list.selected(), Some(3));
+        list.next(); // Should wrap to 0
+        assert_eq!(list.selected(), Some(0));
+        
+        // Test backward navigation
+        list.previous(); // Should wrap to 3
+        assert_eq!(list.selected(), Some(3));
+        list.previous();
+        assert_eq!(list.selected(), Some(2));
+    }
+
+    #[test]
+    fn test_single_item_list() {
+        let items = vec![ListItem::new("Only Item")];
+        let mut list = SelectableList::new("Single Item", items);
+        
+        assert_eq!(list.selected(), Some(0));
+        
+        // Navigation should stay on the same item
+        list.next();
+        assert_eq!(list.selected(), Some(0));
+        
+        list.previous();
+        assert_eq!(list.selected(), Some(0));
     }
 }

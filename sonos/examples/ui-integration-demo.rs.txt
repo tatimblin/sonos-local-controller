@@ -46,10 +46,10 @@ fn basic_discovery_example() -> Result<(), Box<dyn std::error::Error>> {
     
     // Process events
     let speaker_count = events.iter()
-        .filter(|e| matches!(e, SystemEvent::SpeakerFound(_)))
+        .filter(|e| matches!(e, SystemEvent::SpeakerChange(_)))
         .count();
     let has_topology = events.iter()
-        .any(|e| matches!(e, SystemEvent::TopologyReady(_)));
+        .any(|e| matches!(e, SystemEvent::TopologyChange(_)));
     let error_count = events.iter()
         .filter(|e| matches!(e, SystemEvent::Error(_)))
         .count();
@@ -242,10 +242,10 @@ impl UIState {
     
     fn handle_event(&mut self, event: &SystemEvent) {
         match event {
-            SystemEvent::SpeakerFound(_) => {
+            SystemEvent::SpeakerChange(_) => {
                 self.speakers_found += 1;
             },
-            SystemEvent::TopologyReady(_) => {
+            SystemEvent::TopologyChange(_) => {
                 self.topology_ready = true;
             },
             SystemEvent::Error(msg) => {
@@ -393,12 +393,12 @@ fn migration_example() {
     for event in events {
         match event {
             // OLD: SystemEvent::Found(speaker) => { ... }
-            SystemEvent::SpeakerFound(speaker) => {
+            SystemEvent::SpeakerChange(speaker) => {
                 println!("Found: {}", speaker.name());
             },
             
             // NEW events to handle:
-            SystemEvent::TopologyReady(topology) => {
+            SystemEvent::TopologyChange(topology) => {
                 println!("Topology ready: {} groups", topology.zone_group_count());
             },
             

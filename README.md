@@ -35,10 +35,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Process discovery results
     for event in events {
         match event {
-            SystemEvent::SpeakerFound(speaker) => {
+            SystemEvent::SpeakerChange(speaker) => {
                 println!("Found: {} at {}", speaker.name(), speaker.ip());
             },
-            SystemEvent::TopologyReady(topology) => {
+            SystemEvent::TopologyChange(topology) => {
                 println!("Topology: {} groups", topology.zone_group_count());
             },
             SystemEvent::Error(msg) => {
@@ -142,8 +142,8 @@ Events emitted during discovery and system changes:
 ```rust
 #[derive(Debug)]
 pub enum SystemEvent {
-    SpeakerFound(Speaker),           // Individual speaker discovered
-    TopologyReady(Topology),         // Complete topology available
+    SpeakerChange(Speaker),           // Individual speaker discovered
+    TopologyChange(Topology),         // Complete topology available
     Error(String),                   // General errors
 }
 ```

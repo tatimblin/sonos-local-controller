@@ -1,17 +1,21 @@
-use sonos::{SpeakerCommand, System};
-use std::sync::Arc;
+use std::collections::HashMap;
 
-use crate::{topology::topology_list::TopologyList, views::ViewType};
+use sonos::SpeakerInfo;
+
+use crate::{
+    topology::{topology_item::TopologyItem, topology_list::TopologyList},
+    views::ViewType,
+};
 
 use super::store::AppState;
 
 pub enum AppAction {
     SetStatusMessage(String),
-    SetTopology(TopologyList),
-    SetSystem(Arc<System>),
-    SendSpeakerCommand { uuid: String, command: SpeakerCommand },
-    SetActiveSpeaker(String),
-    ToggleSpeakerLock(String),
+    UpdateTopology(TopologyList),
+    SetHighlight(TopologyItem),
+    SetSelectSpeaker(String),
+    SetControlView,
+    HydrateSpeakerTopology(SpeakerInfo),
 }
 
 impl std::fmt::Debug for AppAction {
@@ -20,26 +24,18 @@ impl std::fmt::Debug for AppAction {
             AppAction::SetStatusMessage(message) => {
                 f.debug_tuple("SetStatusMessage").field(message).finish()
             }
-            AppAction::SetTopology(topology) => {
-                f.debug_tuple("SetTopology").field(topology).finish()
+            AppAction::UpdateTopology(topology) => {
+                f.debug_tuple("UpdateTopology").field(topology).finish()
             }
-            AppAction::SetSystem(_) => {
-                f.debug_tuple("SetSystem")
-                    .field(&"Arc<System>")
-                    .finish()
-            },
-            AppAction::SendSpeakerCommand { uuid, command } => {
-                f.debug_struct("SendSpeakerCommand")
-                    .field("uuid", uuid)
-                    .field("command", command)
-                    .finish()
+            AppAction::SetHighlight(item) => f.debug_tuple("SetHighlight").field(item).finish(),
+            AppAction::SetSelectSpeaker(uuid) => {
+                f.debug_tuple("SetSelectSpeaker").field(uuid).finish()
             }
-            AppAction::SetActiveSpeaker(uuid) => {
-                f.debug_tuple("SetActiveSpeaker").field(uuid).finish()
-            }
-            AppAction::ToggleSpeakerLock(uuid) => {
-                f.debug_tuple("ToggleSpeakerLock").field(uuid).finish()
-            }
+            AppAction::SetControlView => f.debug_tuple("SetControlView").finish(),
+            AppAction::HydrateSpeakerTopology(speaker_info) => f
+                .debug_tuple("HydrateSpeakerTopology")
+                .field(&speaker_info.uuid)
+                .finish(),
         }
     }
 }
@@ -49,280 +45,92 @@ pub fn app_reducer(state: &mut AppState, action: AppAction) {
         AppAction::SetStatusMessage(message) => {
             state.status_message = message;
         }
-        AppAction::SetTopology(topology) => {
+        AppAction::UpdateTopology(topology) => {
             log::debug!("SetTopology action received, switching to Control view");
+            let topology_map = create_uuid_to_index_map(&topology);
             state.topology = Some(topology);
-            state.view = ViewType::Control;
+            state.topology_ref = Some(topology_map);
         }
-        AppAction::SetSystem(system) => {
-            log::debug!("SetSystem action received");
-            state.system = Some(system);
+        AppAction::SetHighlight(item) => {
+            log::debug!("SetHighlight action received: {:?}", item.get_type());
+            state.highlight = Some(item);
         }
-        AppAction::SendSpeakerCommand { uuid, command } => {
-            log::debug!("SendSpeakerCommand action received: {} -> {:?}", uuid, command);
-            
-            // Execute the command if we have a system reference
-            if let Some(system) = &state.system {
-                match system.send_command_to_speaker(&uuid, command) {
-                    Ok(()) => {
-                        log::debug!("Successfully sent command to speaker {}", uuid);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to send command to speaker {}: {:?}", uuid, e);
-                        state.status_message = format!("Command failed: {}", e);
-                    }
-                }
-            } else {
-                log::error!("Cannot send command: System not initialized");
-                state.status_message = "System not ready".to_string();
-            }
-        }
-        AppAction::SetActiveSpeaker(uuid) => {
-            log::debug!("SetActiveSpeaker action received: {}", uuid);
-            state.active_speaker_uuid = Some(uuid);
-        }
-        AppAction::ToggleSpeakerLock(uuid) => {
-            log::debug!("ToggleSpeakerLock action received: {}", uuid);
+        AppAction::SetSelectSpeaker(uuid) => {
+            log::debug!("SetSelectSpeaker action received: {}", uuid);
 
-            // Toggle the lock state - if currently locked to this speaker, unlock it
-            // If locked to a different speaker or not locked, lock to this speaker
             let is_currently_locked =
-                state.locked_speaker_uuid.as_ref().map(|s| s.as_str()) == Some(&uuid);
+                state.selected_speaker_ip.as_ref().map(|s| s.as_str()) == Some(&uuid);
 
             if is_currently_locked {
-                state.locked_speaker_uuid = None;
+                state.selected_speaker_ip = None;
             } else {
-                // Ensure single selection constraint - automatically unlock any previously locked speaker
-                state.locked_speaker_uuid = Some(uuid);
+                state.selected_speaker_ip = Some(uuid);
+            }
+        }
+        AppAction::SetControlView => {
+            state.view = ViewType::Control;
+        }
+        AppAction::HydrateSpeakerTopology(speaker_info) => {
+            log::debug!(
+                "HydrateSpeakerTopology action received for UUID: {}",
+                speaker_info.uuid
+            );
+
+            if let Some(ref mut topology) = state.topology {
+                if !topology.items.is_empty() {
+                    if let Some(ref topology_ref) = state.topology_ref {
+                        let normalized_uuid = normalize_uuid(&speaker_info.uuid);
+                        if let Some(&index) = topology_ref.get(&normalized_uuid) {
+                            if let Some(item) = topology.items.get_mut(index) {
+                                match item {
+                                    TopologyItem::Speaker { model, .. } => {
+                                        *model = Some(speaker_info.model.clone());
+                                    }
+                                    TopologyItem::Group { name, .. } => {
+                                        *name = format!(
+                                            "{} ({})",
+                                            speaker_info.name, speaker_info.model
+                                        );
+                                    }
+                                    TopologyItem::Satellite { .. } => {
+                                        log::debug!("Skipping Satellite item (no name field)");
+                                    }
+                                }
+                            }
+                        } else {
+                            log::debug!("UUID {} not found in topology_ref", normalized_uuid);
+                        }
+                    }
+                } else {
+                    log::debug!("Topology is empty");
+                }
+            } else {
+                log::debug!("No topology available");
             }
         }
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::topology::{topology_item::TopologyItem, topology_list::TopologyList};
 
-    fn create_test_topology_with_speakers() -> TopologyList {
-        TopologyList {
-            items: vec![
-                TopologyItem::Speaker {
-                    uuid: "speaker1".to_string(),
-                },
-                TopologyItem::Speaker {
-                    uuid: "speaker2".to_string(),
-                },
-            ],
-        }
-    }
+fn create_uuid_to_index_map(list: &TopologyList) -> HashMap<String, usize> {
+    list.items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| (item.get_uuid().to_string(), index))
+        .collect()
+}
 
-    #[test]
-    fn test_set_active_speaker_with_valid_uuid() {
-        let mut state = AppState::default();
-        state.topology = Some(create_test_topology_with_speakers());
+fn normalize_uuid(uuid: &str) -> String {
+    // Remove "uuid:" prefix if present
+    let without_prefix = if uuid.starts_with("uuid:") {
+        &uuid[5..]
+    } else {
+        uuid
+    };
 
-        app_reducer(
-            &mut state,
-            AppAction::SetActiveSpeaker("speaker1".to_string()),
-        );
-
-        assert_eq!(state.active_speaker_uuid, Some("speaker1".to_string()));
-    }
-
-    #[test]
-    fn test_set_active_speaker_always_sets_uuid() {
-        let mut state = AppState::default();
-        state.topology = Some(create_test_topology_with_speakers());
-
-        app_reducer(
-            &mut state,
-            AppAction::SetActiveSpeaker("any_speaker".to_string()),
-        );
-
-        assert_eq!(state.active_speaker_uuid, Some("any_speaker".to_string()));
-    }
-
-    #[test]
-    fn test_toggle_speaker_lock_with_valid_uuid() {
-        let mut state = AppState::default();
-        state.topology = Some(create_test_topology_with_speakers());
-
-        // Lock speaker1
-        app_reducer(
-            &mut state,
-            AppAction::ToggleSpeakerLock("speaker1".to_string()),
-        );
-        assert_eq!(state.locked_speaker_uuid, Some("speaker1".to_string()));
-
-        // Unlock speaker1
-        app_reducer(
-            &mut state,
-            AppAction::ToggleSpeakerLock("speaker1".to_string()),
-        );
-        assert_eq!(state.locked_speaker_uuid, None);
-    }
-
-    #[test]
-    fn test_toggle_speaker_lock_always_works() {
-        let mut state = AppState::default();
-        state.topology = Some(create_test_topology_with_speakers());
-
-        app_reducer(
-            &mut state,
-            AppAction::ToggleSpeakerLock("any_speaker".to_string()),
-        );
-
-        assert_eq!(state.locked_speaker_uuid, Some("any_speaker".to_string()));
-    }
-
-    #[test]
-    fn test_single_selection_constraint() {
-        let mut state = AppState::default();
-        state.topology = Some(create_test_topology_with_speakers());
-
-        // Lock first speaker
-        app_reducer(
-            &mut state,
-            AppAction::ToggleSpeakerLock("speaker1".to_string()),
-        );
-        assert_eq!(state.locked_speaker_uuid, Some("speaker1".to_string()));
-
-        // Lock second speaker - should replace the first
-        app_reducer(
-            &mut state,
-            AppAction::ToggleSpeakerLock("speaker2".to_string()),
-        );
-        assert_eq!(state.locked_speaker_uuid, Some("speaker2".to_string()));
-    }
-
-    #[test]
-    fn test_set_topology_preserves_selections() {
-        let mut state = AppState::default();
-        state.active_speaker_uuid = Some("speaker1".to_string());
-        state.locked_speaker_uuid = Some("speaker2".to_string());
-
-        let new_topology = create_test_topology_with_speakers();
-        app_reducer(&mut state, AppAction::SetTopology(new_topology));
-
-        // Selections are preserved since we removed validation
-        assert_eq!(state.active_speaker_uuid, Some("speaker1".to_string()));
-        assert_eq!(state.locked_speaker_uuid, Some("speaker2".to_string()));
-    }
-
-    #[test]
-    fn test_set_system_action() {
-        use sonos::System;
-        use std::sync::Arc;
-
-        let mut state = AppState::default();
-        assert!(state.system.is_none());
-
-        // Create a mock system (this will fail in practice but tests the action handling)
-        let system = Arc::new(System::new().unwrap_or_else(|_| panic!("Failed to create system for test")));
-        app_reducer(&mut state, AppAction::SetSystem(system.clone()));
-
-        assert!(state.system.is_some());
-    }
-
-    #[test]
-    fn test_send_speaker_command_without_system() {
-        let mut state = AppState::default();
-        let initial_status = state.status_message.clone();
-
-        app_reducer(&mut state, AppAction::SendSpeakerCommand {
-            uuid: "test-uuid".to_string(),
-            command: SpeakerCommand::Play,
-        });
-
-        // Should update status message when system is not available
-        assert_ne!(state.status_message, initial_status);
-        assert_eq!(state.status_message, "System not ready");
-    }
-
-    #[test]
-    fn test_set_system_action_updates_state() {
-        let mut state = AppState::default();
-        assert!(state.system.is_none());
-
-        // Create a system for testing
-        match System::new() {
-            Ok(system) => {
-                let system_arc = Arc::new(system);
-                app_reducer(&mut state, AppAction::SetSystem(system_arc.clone()));
-                
-                assert!(state.system.is_some());
-                // Verify it's the same Arc by comparing pointer addresses
-                assert!(Arc::ptr_eq(state.system.as_ref().unwrap(), &system_arc));
-            }
-            Err(_) => {
-                // Skip test if system creation fails (no network/hardware available)
-                println!("Skipping test_set_system_action_updates_state - System::new() failed");
-            }
-        }
-    }
-
-    #[test]
-    fn test_send_speaker_command_with_different_commands() {
-        let mut state = AppState::default();
-        
-        // Test each command type updates status appropriately when no system is available
-        let commands = vec![
-            SpeakerCommand::Play,
-            SpeakerCommand::Pause,
-            SpeakerCommand::SetVolume(50),
-            SpeakerCommand::AdjustVolume(5),
-        ];
-
-        for command in commands {
-            state.status_message = "initial".to_string();
-            
-            app_reducer(&mut state, AppAction::SendSpeakerCommand {
-                uuid: "test-speaker".to_string(),
-                command,
-            });
-
-            assert_eq!(state.status_message, "System not ready");
-        }
-    }
-
-    #[test]
-    fn test_send_speaker_command_preserves_other_state() {
-        let mut state = AppState::default();
-        state.active_speaker_uuid = Some("active-speaker".to_string());
-        state.locked_speaker_uuid = Some("locked-speaker".to_string());
-        state.topology = Some(create_test_topology_with_speakers());
-        
-        app_reducer(&mut state, AppAction::SendSpeakerCommand {
-            uuid: "test-uuid".to_string(),
-            command: SpeakerCommand::Play,
-        });
-
-        // Other state should be preserved
-        assert_eq!(state.active_speaker_uuid, Some("active-speaker".to_string()));
-        assert_eq!(state.locked_speaker_uuid, Some("locked-speaker".to_string()));
-        assert!(state.topology.is_some());
-    }
-
-    #[test]
-    fn test_set_status_message_action() {
-        let mut state = AppState::default();
-        let test_message = "Test status message";
-        
-        app_reducer(&mut state, AppAction::SetStatusMessage(test_message.to_string()));
-        
-        assert_eq!(state.status_message, test_message);
-    }
-
-    #[test]
-    fn test_set_topology_switches_to_control_view() {
-        let mut state = AppState::default();
-        assert_eq!(state.view, ViewType::Startup);
-        assert!(state.topology.is_none());
-        
-        let topology = create_test_topology_with_speakers();
-        app_reducer(&mut state, AppAction::SetTopology(topology));
-        
-        assert_eq!(state.view, ViewType::Control);
-        assert!(state.topology.is_some());
+    // Remove "::urn:schemas-upnp-org:device:ZonePlayer:1" suffix if present
+    if let Some(pos) = without_prefix.find("::") {
+        without_prefix[..pos].to_string()
+    } else {
+        without_prefix.to_string()
     }
 }
