@@ -1,9 +1,9 @@
-use sonos::{Satellite, ZoneGroup, ZoneGroupMember};
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
     widgets::ListItem,
 };
+use sonos::{PlayState, Satellite, ZoneGroup, ZoneGroupMember};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopologyItem {
@@ -12,11 +12,13 @@ pub enum TopologyItem {
         name: String,
         uuid: String,
         is_last: bool,
+        play_state: PlayState,
     },
     Speaker {
         ip: String,
-        name: String,
         uuid: String,
+        name: String,
+        model: Option<String>,
         is_last: bool,
     },
     Satellite {
@@ -39,6 +41,7 @@ impl TopologyItem {
             uuid: group.id.to_string(),
             name: group.get_name().to_string(),
             is_last: false,
+            play_state: PlayState::Stopped,
         }
     }
 
@@ -47,6 +50,7 @@ impl TopologyItem {
             ip: speaker.get_ip(),
             name: speaker.zone_name.to_string(),
             uuid: speaker.uuid.to_string(),
+            model: None,
             is_last: false,
         }
     }
@@ -96,32 +100,78 @@ impl TopologyItem {
     /// Converts this TopologyItem to a ListItem for use in SelectableList
     pub fn to_list_item(&self) -> ListItem<'static> {
         match self {
-            TopologyItem::Group { name, .. } => {
-                let line = Line::from(vec![
-                    Span::styled("▶ ", Style::default().fg(Color::Green)),
-                    Span::raw(name.clone()),
-                ]);
-                ListItem::new(line)
-            }
-            TopologyItem::Speaker { name, is_last, .. } => {
-                let prefix = if *is_last { "└─ " } else { "├─ " };
-                let line = Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled(prefix, Style::default().fg(Color::Blue)),
-                    Span::raw(name.clone()),
-                ]);
-                ListItem::new(line)
-            }
-            TopologyItem::Satellite { uuid, .. } => {
-                let line = Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled("Satellite: ", Style::default().fg(Color::Yellow)),
-                    Span::raw(uuid.clone()),
-                ]);
-                ListItem::new(line)
-            }
+            TopologyItem::Group { .. } => self.group_to_list_item(),
+            TopologyItem::Speaker { .. } => self.speaker_to_list_item(),
+            TopologyItem::Satellite { .. } => self.satellite_to_list_item(),
         }
     }
+
+    /// Converts a Group variant to a ListItem
+    fn group_to_list_item(&self) -> ListItem<'static> {
+        if let TopologyItem::Group {
+            name, play_state, ..
+        } = self
+        {
+            let line = Line::from(vec![
+                Span::raw(get_play_state_icon(play_state)),
+                Span::raw(name.clone()),
+            ]);
+            ListItem::new(line)
+        } else {
+            panic!("group_to_list_item called on non-Group variant")
+        }
+    }
+
+    /// Converts a Speaker variant to a ListItem
+    fn speaker_to_list_item(&self) -> ListItem<'static> {
+        if let TopologyItem::Speaker {
+            name,
+            model,
+            is_last,
+            ..
+        } = self
+        {
+            let prefix = if *is_last { "└─ " } else { "├─ " };
+            let mut spans = vec![Span::raw("  "), Span::raw(prefix), Span::raw(name.clone())];
+
+            if let Some(model_name) = model {
+                spans.push(Span::styled(" • ", Style::default().fg(Color::Gray)));
+                spans.push(Span::styled(
+                    model_name.clone(),
+                    Style::default().fg(Color::Gray),
+                ));
+            }
+
+            let line = Line::from(spans);
+            ListItem::new(line)
+        } else {
+            panic!("speaker_to_list_item called on non-Speaker variant")
+        }
+    }
+
+    /// Converts a Satellite variant to a ListItem
+    fn satellite_to_list_item(&self) -> ListItem<'static> {
+        if let TopologyItem::Satellite { uuid, .. } = self {
+            let line = Line::from(vec![
+                Span::raw("  "),
+                Span::styled("Satellite: ", Style::default().fg(Color::Yellow)),
+                Span::raw(uuid.clone()),
+            ]);
+            ListItem::new(line)
+        } else {
+            panic!("satellite_to_list_item called on non-Satellite variant")
+        }
+    }
+}
+
+fn get_play_state_icon(state: &PlayState) -> String {
+    let char = match state {
+        PlayState::Playing => "▶ ",
+        PlayState::Transitioning => "▶ ",
+        PlayState::Paused => "⏸ ",
+        PlayState::Stopped => "◼ ",
+    };
+    char.to_string()
 }
 
 #[cfg(test)]
@@ -206,6 +256,7 @@ mod tests {
             name: "Living Room".to_string(),
             uuid: "RINCON_123456".to_string(),
             is_last: false,
+            play_state: PlayState::Stopped,
         };
 
         let list_item = group.to_list_item();
@@ -219,6 +270,7 @@ mod tests {
             ip: "192.168.1.101".to_string(),
             name: "Kitchen".to_string(),
             uuid: "RINCON_789012".to_string(),
+            model: Some("Connect:Amp".to_string()),
             is_last: false,
         };
 
@@ -232,6 +284,7 @@ mod tests {
             ip: "192.168.1.101".to_string(),
             name: "Kitchen".to_string(),
             uuid: "RINCON_789012".to_string(),
+            model: Some("Connect:Amp".to_string()),
             is_last: true,
         };
 

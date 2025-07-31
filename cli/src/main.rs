@@ -55,27 +55,27 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
-        use_speakers(&self.store, || {
-            terminal
-                .draw(|frame| self.current_view.render(frame))
-                .map(|_| ())
-        })?;
+      use_topology(&self.store, || {
+        terminal
+            .draw(|frame| self.current_view.render(frame))
+            .map(|_| ())
+      })?;
 
-        use_topology(&self.store, || {
-            terminal
-                .draw(|frame| self.current_view.render(frame))
-                .map(|_| ())
-        })?;
+      use_speakers(&self.store, || {
+        terminal
+            .draw(|frame| self.current_view.render(frame))
+            .map(|_| ())
+      })?;
 
-        while !self.exit {
-            self.update_current_view();
-            terminal.draw(|frame| self.current_view.render(frame))?;
+      while !self.exit {
+          self.update_current_view();
+          terminal.draw(|frame| self.current_view.render(frame))?;
 
-            if let event::Event::Key(key_event) = event::read()? {
-                self.handle_input(key_event)?;
-            }
-        }
-        Ok(())
+          if let event::Event::Key(key_event) = event::read()? {
+              self.handle_input(key_event)?;
+          }
+      }
+      Ok(())
     }
 
     fn handle_input(&mut self, key_event: KeyEvent) -> io::Result<()> {

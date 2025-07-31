@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 
 use crate::{topology::{topology_item::TopologyItem, topology_list::TopologyList}, views::ViewType};
 
@@ -16,6 +16,7 @@ pub struct AppState {
     pub view: ViewType,
     pub status_message: String,
     pub topology: Option<TopologyList>,
+    pub topology_ref: Option<HashMap<String, usize>>,
     pub highlight: Option<TopologyItem>,
     pub selected_speaker_ip: Option<String>,
 }
@@ -26,6 +27,7 @@ impl Default for AppState {
             view: ViewType::Startup,
             status_message: "loading...".to_owned(),
             topology: None,
+            topology_ref: None,
             highlight: None,
             selected_speaker_ip: None,
         }
