@@ -85,31 +85,6 @@ fn setup_discovery(
 
 /// Process an SSDP response and extract speaker information
 fn process_ssdp_response(response: SsdpResponse) -> Option<SpeakerInfo> {
-    let ip = http::get_ip_from_url(&response.location)?;
-
-    // Try to get detailed info first, fallback to basic info from SSDP
-    SpeakerController::new()
-        .get_info(&ip)
-        .ok()
-        .or_else(|| create_fallback_speaker_info(&ip, &response))
-}
-
-/// Create fallback speaker info when detailed info fetch fails
-fn create_fallback_speaker_info(ip: &str, response: &SsdpResponse) -> Option<SpeakerInfo> {
-    Some(SpeakerInfo {
-        ip: ip.to_string(),
-        name: response
-            .friendly_name
-            .clone()
-            .unwrap_or_else(|| "Unknown Speaker".to_string()),
-        room_name: "Unknown Room".to_string(),
-        uuid: extract_uuid_from_usn(&response.usn).unwrap_or_else(|| "unknown".to_string()),
-        model: "Unknown Model".to_string(),
-        software_version: "Unknown".to_string(),
-    })
-}
-
-/// Extract UUID from USN string (format: uuid:RINCON_...)
-fn extract_uuid_from_usn(usn: &str) -> Option<String> {
-    usn.strip_prefix("uuid:").map(|s| s.to_string())
+  let ip = http::get_ip_from_url(&response.location)?;
+  SpeakerInfo::from_location(&ip).ok()
 }

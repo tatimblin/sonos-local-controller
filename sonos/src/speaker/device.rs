@@ -1,5 +1,10 @@
 use serde_derive::Deserialize;
 
+#[derive(Debug, Deserialize)]
+pub struct DeviceRoot {
+  pub(crate) device: Device,
+}
+
 #[derive(Clone, Debug, Deserialize, Default)]
 pub struct Device {
   #[serde(rename = "deviceType")]
@@ -27,7 +32,7 @@ pub struct Device {
   pub model_url: String,
 
   #[serde(rename = "softwareVersion")]
-  pub software_version: Option<String>,
+  pub software_version: String,
 
   #[serde(rename = "hardwareVersion")]
   pub hardware_version: Option<String>,
@@ -90,7 +95,7 @@ pub struct Device {
   pub variant: Option<u16>,
 
   #[serde(rename = "internalSpeakerSize")]
-  pub internal_speaker_size: Option<u16>,
+  pub internal_speaker_size: Option<i16>,
 
   #[serde(rename = "memory")]
   pub memory: Option<u16>,

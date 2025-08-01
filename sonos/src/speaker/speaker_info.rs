@@ -1,4 +1,8 @@
-#[derive(Debug, Clone, PartialEq)]
+use crate::speaker::DeviceRoot;
+use crate::SonosError;
+use serde_derive::Deserialize;
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct SpeakerInfo {
     /// IP address of the speaker
     pub ip: String,
@@ -15,34 +19,43 @@ pub struct SpeakerInfo {
 }
 
 impl SpeakerInfo {
-    /// Create a new SpeakerInfo with minimal information
-    pub fn new(ip: String, uuid: String) -> Self {
-        Self {
-            ip,
-            name: "Unknown Speaker".to_string(),
-            room_name: "Unknown Room".to_string(),
-            uuid,
-            model: "Unknown Model".to_string(),
-            software_version: "Unknown".to_string(),
+    pub fn from_location(ip: &str) -> Result<SpeakerInfo, SonosError> {
+        let location = format!("http://{}:1400/xml/device_description.xml", ip);
+        let xml = Self::get_xml(&location)?;
+
+        let mut speaker = Self::from_xml(&xml)?;
+        speaker.ip = ip.to_string();
+        Ok(speaker)
+    }
+
+    fn get_xml(endpoint: &str) -> Result<String, SonosError> {
+        match ureq::get(endpoint).call() {
+            Ok(response) => response
+                .into_string()
+                .map_err(|_| SonosError::ParseError("Failed to read response body".into())),
+            Err(_) => Err(SonosError::DeviceUnreachable),
         }
     }
-    
-    /// Create a SpeakerInfo with full information
-    pub fn with_details(
-        ip: String,
-        name: String,
-        room_name: String,
-        uuid: String,
-        model: String,
-        software_version: String,
-    ) -> Self {
-        Self {
-            ip,
-            name,
-            room_name,
-            uuid,
-            model,
-            software_version,
-        }
+
+   pub fn from_xml(xml: &str) -> Result<Self, SonosError> {
+      log::debug!("Attempting to parse XML: {}", xml);
+
+        let root: DeviceRoot = serde_xml_rs::from_str(xml).map_err(|e| {
+            log::debug!("XML parsing failed with error: {}", e);
+            log::debug!("XML content that failed to parse: {}", xml);
+            SonosError::ParseError(format!("Failed to parse DeviceRoot: {}", e))
+        })?;
+
+        let device = root.device;
+        log::debug!("Successfully parsed device: {:?}", device);
+
+        Ok(SpeakerInfo {
+            ip: String::new(), // This will be set by the caller
+            name: device.name,
+            room_name: device.room_name,
+            uuid: device.udn,
+            model: device.model_name,
+            software_version: device.software_version,
+        })
     }
 }

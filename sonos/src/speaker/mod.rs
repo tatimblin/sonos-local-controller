@@ -5,4 +5,4 @@ mod speaker_info;
 pub use speaker_info::SpeakerInfo;
 
 mod device;
-pub use device::Device;
+pub use device::{Device, DeviceRoot};
