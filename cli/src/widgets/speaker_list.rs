@@ -19,7 +19,7 @@ impl SpeakerList {
     let items: Vec<ListItem> = topology
       .items
       .iter()
-      .map(|item| item.to_list_item())
+      .map(|item| item.to_list_item(false))
       .collect();
 
     Self {
@@ -29,6 +29,19 @@ impl SpeakerList {
   }
 
   pub fn draw(&mut self, frame: &mut Frame, layout: Rect) {
+    let selected_index = self.widget.selected();
+
+    let items: Vec<ListItem> = self.topology
+      .items
+      .iter()
+      .enumerate()
+      .map(|(i, item)| {
+        let is_highlighted = selected_index == Some(i);
+        item.to_list_item(is_highlighted)
+      })
+      .collect();
+    
+    self.widget.update_items(items);
     self.widget.draw(frame, layout);
   }
 

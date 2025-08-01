@@ -102,16 +102,16 @@ impl TopologyItem {
     }
 
     /// Converts this TopologyItem to a ListItem for use in SelectableList
-    pub fn to_list_item(&self) -> ListItem<'static> {
+    pub fn to_list_item(&self, highlighted: bool) -> ListItem<'static> {
         match self {
-            TopologyItem::Group { .. } => self.group_to_list_item(),
-            TopologyItem::Speaker { .. } => self.speaker_to_list_item(),
-            TopologyItem::Satellite { .. } => self.satellite_to_list_item(),
+            TopologyItem::Group { .. } => self.group_to_list_item(highlighted),
+            TopologyItem::Speaker { .. } => self.speaker_to_list_item(highlighted),
+            TopologyItem::Satellite { .. } => self.satellite_to_list_item(highlighted),
         }
     }
 
     /// Converts a Group variant to a ListItem
-    fn group_to_list_item(&self) -> ListItem<'static> {
+    fn group_to_list_item(&self, _highlighted: bool) -> ListItem<'static> {
         if let TopologyItem::Group {
             name, play_state, ..
         } = self
@@ -127,7 +127,7 @@ impl TopologyItem {
     }
 
     /// Converts a Speaker variant to a ListItem
-    fn speaker_to_list_item(&self) -> ListItem<'static> {
+    fn speaker_to_list_item(&self, highlighted: bool) -> ListItem<'static> {
         if let TopologyItem::Speaker {
             name,
             model,
@@ -139,11 +139,13 @@ impl TopologyItem {
             let mut spans = vec![Span::raw("  "), Span::raw(prefix), Span::raw(name.clone())];
 
             if let Some(model_name) = model {
-                spans.push(Span::styled(" • ", Style::default().fg(Color::Gray)));
-                spans.push(Span::styled(
-                    model_name.clone(),
-                    Style::default().fg(Color::Gray),
-                ));
+                let style = if highlighted {
+                    Style::default()
+                } else {
+                    Style::default().fg(Color::Gray)
+                };
+                spans.push(Span::styled(" • ", style));
+                spans.push(Span::styled(model_name.clone(), style));
             }
 
             let line = Line::from(spans);
@@ -154,7 +156,7 @@ impl TopologyItem {
     }
 
     /// Converts a Satellite variant to a ListItem
-    fn satellite_to_list_item(&self) -> ListItem<'static> {
+    fn satellite_to_list_item(&self, _highlighted: bool) -> ListItem<'static> {
         if let TopologyItem::Satellite { uuid, .. } = self {
             let line = Line::from(vec![
                 Span::raw("  "),
@@ -263,7 +265,7 @@ mod tests {
             play_state: PlayState::Stopped,
         };
 
-        let list_item = group.to_list_item();
+        let list_item = group.to_list_item(false);
         // Verify the ListItem was created successfully
         drop(list_item);
     }
@@ -278,7 +280,7 @@ mod tests {
             is_last: false,
         };
 
-        let list_item = speaker.to_list_item();
+        let list_item = speaker.to_list_item(false);
         drop(list_item);
     }
 
@@ -292,7 +294,7 @@ mod tests {
             is_last: true,
         };
 
-        let list_item = speaker.to_list_item();
+        let list_item = speaker.to_list_item(false);
         drop(list_item);
     }
 
@@ -303,7 +305,7 @@ mod tests {
             is_last: false,
         };
 
-        let list_item = satellite.to_list_item();
+        let list_item = satellite.to_list_item(false);
         drop(list_item);
     }
 }

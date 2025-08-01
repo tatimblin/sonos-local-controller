@@ -73,6 +73,10 @@ impl SelectableList {
     pub fn len(&self) -> usize {
         self.items.len()
     }
+
+    pub fn update_items(&mut self, items: Vec<ListItem<'static>>) {
+        self.items = items;
+    }
 }
 
 #[cfg(test)]
@@ -188,7 +192,7 @@ mod tests {
             ListItem::new("Third Item"),
         ];
         let list = SelectableList::new("ListItem Test", items);
-        
+
         assert_eq!(list.title, "ListItem Test");
         assert_eq!(list.items.len(), 3);
         assert_eq!(list.selected(), Some(0));
@@ -198,17 +202,14 @@ mod tests {
     fn test_list_item_with_styled_content() {
         use ratatui::style::{Color, Style};
         use ratatui::text::{Line, Span};
-        
+
         let styled_item = ListItem::new(Line::from(vec![
             Span::styled("Styled", Style::default().fg(Color::Red)),
             Span::raw(" Item"),
         ]));
-        
-        let items = vec![
-            ListItem::new("Normal Item"),
-            styled_item,
-        ];
-        
+
+        let items = vec![ListItem::new("Normal Item"), styled_item];
+
         let list = SelectableList::new("Styled Test", items);
         assert_eq!(list.items.len(), 2);
         assert_eq!(list.selected(), Some(0));
@@ -223,7 +224,7 @@ mod tests {
             ListItem::new("Delta"),
         ];
         let mut list = SelectableList::new("Navigation Test", items);
-        
+
         // Test forward navigation
         assert_eq!(list.selected(), Some(0));
         list.next();
@@ -234,7 +235,7 @@ mod tests {
         assert_eq!(list.selected(), Some(3));
         list.next(); // Should wrap to 0
         assert_eq!(list.selected(), Some(0));
-        
+
         // Test backward navigation
         list.previous(); // Should wrap to 3
         assert_eq!(list.selected(), Some(3));
@@ -246,13 +247,13 @@ mod tests {
     fn test_single_item_list() {
         let items = vec![ListItem::new("Only Item")];
         let mut list = SelectableList::new("Single Item", items);
-        
+
         assert_eq!(list.selected(), Some(0));
-        
+
         // Navigation should stay on the same item
         list.next();
         assert_eq!(list.selected(), Some(0));
-        
+
         list.previous();
         assert_eq!(list.selected(), Some(0));
     }
