@@ -1,4 +1,6 @@
+use crossterm::terminal;
 use ratatui::{
+    layout::Alignment,
     style::{Color, Style},
     text::{Line, Span},
     widgets::ListItem,
@@ -32,6 +34,42 @@ pub enum TopologyType {
     Group,
     Speaker,
     Satellite,
+}
+
+/// Helper function to create a line with left content and optional right-aligned content
+fn create_aligned_line(
+    left_spans: Vec<Span<'static>>,
+    right_content: Option<Span<'static>>,
+) -> Line<'static> {
+    let mut spans = left_spans;
+
+    if let Some(right_span) = right_content {
+        // Calculate the actual character count of left content
+        let left_content_length: usize = spans
+            .iter()
+            .map(|s| s.content.chars().count()) // Use chars().count() instead of len() for Unicode safety
+            .sum();
+
+        let terminal_width: usize = terminal::size()
+            .map(|(width, _)| width as usize)
+            .unwrap_or(80);
+
+        let right_content_length = right_span.content.chars().count();
+        let min_gap = 1; // Minimum 1 space between content and right-aligned text
+        let edge_buffer = 2; // Reserve 2 characters from the right edge to prevent cutoff
+
+        // Ensure we have enough space for content + gap + right text + buffer
+        let total_needed = left_content_length + min_gap + right_content_length + edge_buffer;
+
+        if terminal_width >= total_needed {
+            let padding_needed =
+                terminal_width - left_content_length - right_content_length - edge_buffer;
+            spans.push(Span::raw(" ".repeat(padding_needed)));
+            spans.push(right_span);
+        }
+    }
+
+    Line::from(spans)
 }
 
 impl TopologyItem {
@@ -116,10 +154,14 @@ impl TopologyItem {
             name, play_state, ..
         } = self
         {
-            let line = Line::from(vec![
+            let left_spans = vec![
                 Span::raw(get_play_state_icon(play_state)),
                 Span::raw(name.clone()),
-            ]);
+            ];
+
+            let right_content = Some(Span::styled("Group", Style::default().fg(Color::Blue)));
+
+            let line = create_aligned_line(left_spans, right_content);
             ListItem::new(line)
         } else {
             panic!("group_to_list_item called on non-Group variant")
@@ -136,7 +178,7 @@ impl TopologyItem {
         } = self
         {
             let prefix = if *is_last { "└─ " } else { "├─ " };
-            let mut spans = vec![Span::raw("  "), Span::raw(prefix), Span::raw(name.clone())];
+            let mut left_spans = vec![Span::raw("  "), Span::raw(prefix), Span::raw(name.clone())];
 
             if let Some(model_name) = model {
                 let style = if highlighted {
@@ -144,11 +186,13 @@ impl TopologyItem {
                 } else {
                     Style::default().fg(Color::Gray)
                 };
-                spans.push(Span::styled(" • ", style));
-                spans.push(Span::styled(model_name.clone(), style));
+                left_spans.push(Span::styled(" • ", style));
+                left_spans.push(Span::styled(model_name.clone(), style));
             }
 
-            let line = Line::from(spans);
+            let right_content = Some(Span::styled("Online", Style::default().fg(Color::Green)));
+
+            let line = create_aligned_line(left_spans, right_content);
             ListItem::new(line)
         } else {
             panic!("speaker_to_list_item called on non-Speaker variant")
