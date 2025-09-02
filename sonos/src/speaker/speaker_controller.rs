@@ -1,3 +1,5 @@
+use log::info;
+
 use crate::client::Client;
 use crate::error::SonosError;
 use crate::model::{Action, PlayState};
@@ -108,14 +110,14 @@ impl SpeakerController {
     }
 
     /// Adjust the volume by a relative amount (-100 to +100)
-    pub fn adjust_volume(&self, ip: &str, adjustment: i8) -> Result<(), SonosError> {
+    pub fn adjust_volume(&self, ip: &str, adjustment: i8) -> Result<u8, SonosError> {
         let payload = format!(
             "<InstanceID>0</InstanceID><Channel>Master</Channel><Adjustment>{}</Adjustment>",
             adjustment
         );
-        self.client
+        let response = self.client
             .send_action(ip, Action::SetRelativeVolume, &payload)?;
-        Ok(())
+        self.parse_element_u8(&response, "NewVolume")
     }
 
     fn is_coordinator(&self, ip: &str) -> Result<bool, SonosError> {

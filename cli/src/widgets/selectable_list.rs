@@ -75,7 +75,27 @@ impl SelectableList {
     }
 
     pub fn update_items(&mut self, items: Vec<ListItem<'static>>) {
+        let had_items = !self.items.is_empty();
+        let will_have_items = !items.is_empty();
+        
         self.items = items;
+        
+        // If we didn't have items before but now we do, select the first item
+        if !had_items && will_have_items && self.state.selected().is_none() {
+            self.state.select(Some(0));
+        }
+        // If we had items but now we don't, clear selection
+        else if had_items && !will_have_items {
+            self.state.select(None);
+        }
+        // If we have items but current selection is out of bounds, adjust it
+        else if will_have_items {
+            if let Some(selected) = self.state.selected() {
+                if selected >= self.items.len() {
+                    self.state.select(Some(self.items.len() - 1));
+                }
+            }
+        }
     }
 }
 

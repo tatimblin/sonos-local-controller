@@ -1,6 +1,12 @@
-use std::{collections::HashMap, sync::{Arc, Mutex}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
-use crate::{topology::{topology_item::TopologyItem, topology_list::TopologyList}, views::ViewType};
+use crate::{
+    topology::{topology_item::TopologyItem, topology_list::TopologyList},
+    views::ViewType,
+};
 
 use super::reducers::{app_reducer, AppAction};
 
@@ -44,7 +50,10 @@ impl AppState {
     }
 
     pub fn get_speaker_display_state(&self, uuid: &str) -> SpeakerDisplayState {
-        match (self.is_speaker_highlighted(uuid), self.is_speaker_selected(uuid)) {
+        match (
+            self.is_speaker_highlighted(uuid),
+            self.is_speaker_selected(uuid),
+        ) {
             (true, true) => SpeakerDisplayState::ActiveAndLocked,
             (true, false) => SpeakerDisplayState::Active,
             (false, true) => SpeakerDisplayState::Locked,

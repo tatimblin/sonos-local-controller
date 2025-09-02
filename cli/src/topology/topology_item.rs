@@ -1,6 +1,5 @@
 use crossterm::terminal;
 use ratatui::{
-    layout::Alignment,
     style::{Color, Style},
     text::{Line, Span},
     widgets::ListItem,
@@ -15,6 +14,7 @@ pub enum TopologyItem {
         uuid: String,
         is_last: bool,
         play_state: PlayState,
+        volume: Option<u8>,
     },
     Speaker {
         ip: String,
@@ -22,6 +22,7 @@ pub enum TopologyItem {
         name: String,
         model: Option<String>,
         is_last: bool,
+        volume: Option<u8>,
     },
     Satellite {
         uuid: String,
@@ -77,6 +78,7 @@ impl TopologyItem {
         let ip = group.get_coordinator().get_ip();
         let controller = SpeakerController::new();
         let play_state = controller.get_play_state(&ip).unwrap_or(PlayState::Stopped);
+        let volume = controller.get_volume(&ip).ok();
 
         TopologyItem::Group {
             ip,
@@ -84,16 +86,22 @@ impl TopologyItem {
             name: group.get_name().to_string(),
             is_last: false,
             play_state,
+            volume,
         }
     }
 
     pub fn from_speaker(speaker: &ZoneGroupMember) -> Self {
+        let ip = speaker.get_ip();
+        let controller = SpeakerController::new();
+        let volume = controller.get_volume(&ip).ok();
+
         TopologyItem::Speaker {
-            ip: speaker.get_ip(),
+            ip,
             name: speaker.zone_name.to_string(),
             uuid: speaker.uuid.to_string(),
             model: None,
             is_last: false,
+            volume,
         }
     }
 
@@ -174,6 +182,7 @@ impl TopologyItem {
             name,
             model,
             is_last,
+            volume,
             ..
         } = self
         {
@@ -190,7 +199,7 @@ impl TopologyItem {
                 left_spans.push(Span::styled(model_name.clone(), style));
             }
 
-            let right_content = Some(Span::styled("Online", Style::default().fg(Color::Green)));
+            let right_content = volume.as_ref().map(|v| Span::raw(format!("{}%", v)));
 
             let line = create_aligned_line(left_spans, right_content);
             ListItem::new(line)
@@ -210,6 +219,24 @@ impl TopologyItem {
             ListItem::new(line)
         } else {
             panic!("satellite_to_list_item called on non-Satellite variant")
+        }
+    }
+
+    pub fn set_volume(&mut self, volume: u8) {
+        match self {
+            TopologyItem::Group {
+                volume: ref mut vol,
+                ..
+            }
+            | TopologyItem::Speaker {
+                volume: ref mut vol,
+                ..
+            } => {
+                *vol = Some(volume);
+            }
+            TopologyItem::Satellite { .. } => {
+                // Satellites don't have volume control
+            }
         }
     }
 }
@@ -307,6 +334,7 @@ mod tests {
             uuid: "RINCON_123456".to_string(),
             is_last: false,
             play_state: PlayState::Stopped,
+            volume: None,
         };
 
         let list_item = group.to_list_item(false);
@@ -322,6 +350,7 @@ mod tests {
             uuid: "RINCON_789012".to_string(),
             model: Some("Connect:Amp".to_string()),
             is_last: false,
+            volume: Some(10),
         };
 
         let list_item = speaker.to_list_item(false);
@@ -336,6 +365,7 @@ mod tests {
             uuid: "RINCON_789012".to_string(),
             model: Some("Connect:Amp".to_string()),
             is_last: true,
+            volume: Some(10),
         };
 
         let list_item = speaker.to_list_item(false);
