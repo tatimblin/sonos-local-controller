@@ -3,6 +3,9 @@ use ratatui::{
   text::{Line, Span}
 };
 
+/**
+ * Line formatting similar to `justify-content: space-between;` in css.
+ */
 pub fn space_between<'a>(
   left: Vec<Span<'a>>,
   right: Option<Span<'a>>
@@ -42,17 +45,25 @@ mod tests {
   use super::*;
   use ratatui::text::Span;
 
+  fn render(line: &Line) -> String {
+    line.spans.iter().map(|s| s.content.as_ref()).collect()
+  }
+
   #[test]
   fn aligns_when_enough_space() {
     let line = space_between_with_width(vec![Span::raw("foo")], Some(Span::raw("bar")), 10);
-    let result: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-    assert_eq!(result, "foo  bar");
+    assert_eq!(render(&line), "foo  bar");
   }
 
   #[test]
   fn overflows_when_not_enough_space() {
     let line = space_between_with_width(vec![Span::raw("foo")], Some(Span::raw("bar")), 5);
-    let result: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-    assert_eq!(result, "foo bar");
+    assert_eq!(render(&line), "foo bar");
+  }
+
+  #[test]
+  fn aligns_with_multiple_left() {
+    let line = space_between_with_width(vec![Span::raw("foo"), Span::raw("bar")], Some(Span::raw("fizz")), 20);
+    assert_eq!(render(&line), "foobar        fizz");
   }
 }
