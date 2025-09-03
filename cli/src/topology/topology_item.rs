@@ -1,10 +1,11 @@
-use crossterm::terminal;
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
     widgets::ListItem,
 };
 use sonos::{PlayState, Satellite, SpeakerController, ZoneGroup, ZoneGroupMember};
+
+use crate::topology::justify_content::space_between;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopologyItem {
@@ -35,42 +36,6 @@ pub enum TopologyType {
     Group,
     Speaker,
     Satellite,
-}
-
-/// Helper function to create a line with left content and optional right-aligned content
-fn create_aligned_line(
-    left_spans: Vec<Span<'static>>,
-    right_content: Option<Span<'static>>,
-) -> Line<'static> {
-    let mut spans = left_spans;
-
-    if let Some(right_span) = right_content {
-        // Calculate the actual character count of left content
-        let left_content_length: usize = spans
-            .iter()
-            .map(|s| s.content.chars().count()) // Use chars().count() instead of len() for Unicode safety
-            .sum();
-
-        let terminal_width: usize = terminal::size()
-            .map(|(width, _)| width as usize)
-            .unwrap_or(80);
-
-        let right_content_length = right_span.content.chars().count();
-        let min_gap = 1; // Minimum 1 space between content and right-aligned text
-        let edge_buffer = 2; // Reserve 2 characters from the right edge to prevent cutoff
-
-        // Ensure we have enough space for content + gap + right text + buffer
-        let total_needed = left_content_length + min_gap + right_content_length + edge_buffer;
-
-        if terminal_width >= total_needed {
-            let padding_needed =
-                terminal_width - left_content_length - right_content_length - edge_buffer;
-            spans.push(Span::raw(" ".repeat(padding_needed)));
-            spans.push(right_span);
-        }
-    }
-
-    Line::from(spans)
 }
 
 impl TopologyItem {
@@ -169,7 +134,7 @@ impl TopologyItem {
 
             let right_content = Some(Span::styled("Group", Style::default().fg(Color::Blue)));
 
-            let line = create_aligned_line(left_spans, right_content);
+            let line = space_between(left_spans, right_content);
             ListItem::new(line)
         } else {
             panic!("group_to_list_item called on non-Group variant")
@@ -201,7 +166,7 @@ impl TopologyItem {
 
             let right_content = volume.as_ref().map(|v| Span::raw(format!("{}%", v)));
 
-            let line = create_aligned_line(left_spans, right_content);
+            let line = space_between(left_spans, right_content);
             ListItem::new(line)
         } else {
             panic!("speaker_to_list_item called on non-Speaker variant")
