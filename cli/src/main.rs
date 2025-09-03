@@ -57,14 +57,14 @@ impl App {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
       use_topology(&self.store, || {
         terminal
-            .draw(|frame| self.current_view.render(frame))
-            .map(|_| ())
+          .draw(|frame| self.current_view.render(frame))
+          .map(|_| ())
       })?;
 
       use_speakers(&self.store, || {
         terminal
-            .draw(|frame| self.current_view.render(frame))
-            .map(|_| ())
+          .draw(|frame| self.current_view.render(frame))
+          .map(|_| ())
       })?;
 
       while !self.exit {
