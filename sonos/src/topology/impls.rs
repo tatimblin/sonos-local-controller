@@ -38,6 +38,10 @@ impl ZoneGroup {
     pub fn get_speakers(&self) -> &Vec<ZoneGroupMember> {
         &self.members
     }
+
+    pub fn count_children(&self) -> usize {
+      self.members.len()
+    }
 }
 
 impl ZoneGroupMember {
