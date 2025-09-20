@@ -12,7 +12,7 @@ impl TopologyItem {
         let ip = group.get_coordinator().get_ip();
         let controller = SpeakerController::new();
         let play_state = controller.get_play_state(&ip).unwrap_or(PlayState::Stopped);
-        let volume = controller.get_volume(&ip).ok();
+        let volume = controller.get_group_volume(&ip).ok();
 
         TopologyItem::Group {
             ip,
@@ -30,6 +30,7 @@ impl TopologyItem {
             name,
             play_state,
             children_count,
+            volume,
             ..
         } = self
         {
@@ -38,7 +39,7 @@ impl TopologyItem {
                 Span::raw(TopologyItem::get_name(name, children_count)),
             ];
 
-            let right_content = Some(Span::styled("Group", Style::default().fg(Color::Blue)));
+            let right_content = volume.as_ref().map(|v| Span::raw(format!("{}%", v)));
 
             let line = space_between(left_spans, right_content);
 

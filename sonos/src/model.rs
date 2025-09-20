@@ -8,6 +8,7 @@ pub struct ServiceInfo {
 pub enum Service {
   AVTransport(ServiceInfo),
   RenderingControl(ServiceInfo),
+  GroupRenderingControl(ServiceInfo),
   ZoneGroupTopology(ServiceInfo),
 }
 
@@ -26,6 +27,13 @@ impl Service {
     })
   }
 
+  pub fn group_rendering_control() -> Self {
+    Service::RenderingControl(ServiceInfo {
+      endpoint: "MediaRenderer/GroupRenderingControl/Control",
+      service: "urn:schemas-upnp-org:service:GroupRenderingControl:1",
+    })
+  }
+
   pub fn zone_group_topology() -> Self {
     Service::ZoneGroupTopology(ServiceInfo {
       endpoint: "ZoneGroupTopology/Control",
@@ -37,6 +45,7 @@ impl Service {
     match self {
       Service::AVTransport(info) => info,
       Service::RenderingControl(info) => info,
+      Service::GroupRenderingControl(info) => info,
       Service::ZoneGroupTopology(info) => info,
     }
   }
@@ -48,6 +57,7 @@ pub enum Action {
   Pause,
   Stop,
   GetVolume,
+  GetGroupVolume,
   SetVolume,
   SetRelativeVolume,
   GetZoneGroupState,
@@ -71,6 +81,7 @@ impl Action {
       Action::Pause => "Pause",
       Action::Stop => "Stop",
       Action::GetVolume => "GetVolume",
+      Action::GetGroupVolume => "GetGroupVolume",
       Action::SetVolume => "SetVolume",
       Action::SetRelativeVolume => "SetRelativeVolume",
       Action::GetZoneGroupState => "GetZoneGroupState",
@@ -93,6 +104,8 @@ impl Action {
       | Action::SetVolume
       | Action::SetRelativeVolume
       => Service::rendering_control(),
+      Action::GetGroupVolume
+      => Service::group_rendering_control(),
       Action::GetZoneGroupState
       => Service::zone_group_topology(),
     }

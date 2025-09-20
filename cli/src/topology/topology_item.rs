@@ -104,9 +104,9 @@ impl TopologyItem {
 
 pub fn get_play_state_icon(state: &PlayState) -> String {
   let char = match state {
-    PlayState::Playing => "▶ ",
-    PlayState::Transitioning => "▶ ",
-    PlayState::Paused => "⏸ ",
+    PlayState::Playing => "⏸ ",
+    PlayState::Transitioning => "⏸ ",
+    PlayState::Paused => "▶ ",
     PlayState::Stopped => "◼ ",
   };
   char.to_string()

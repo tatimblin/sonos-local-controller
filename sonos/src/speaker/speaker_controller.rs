@@ -95,6 +95,12 @@ impl SpeakerController {
         self.parse_element_u8(&response, "CurrentVolume")
     }
 
+    pub fn get_group_volume(&self, ip: &str) -> Result<u8, SonosError> {
+      let payload = "<InstanceID>0</InstanceID>";
+      let response = self.client.send_action(ip, Action::GetGroupVolume, payload)?;
+      self.parse_element_u8(&response, "CurrentVolume")
+    }
+
     /// Set the volume level (0-100)
     pub fn set_volume(&self, ip: &str, volume: u8) -> Result<(), SonosError> {
         if volume > 100 {
