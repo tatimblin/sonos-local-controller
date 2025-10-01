@@ -42,7 +42,7 @@ impl Default for AppState {
 
 impl AppState {
     pub fn is_speaker_highlighted(&self, uuid: &str) -> bool {
-        self.highlight.as_ref().map(|s| s.get_uuid()) == Some(uuid)
+        self.highlight.as_ref().map(|s| s.get_uuid()) == Some(uuid.to_owned())
     }
 
     pub fn is_speaker_selected(&self, uuid: &str) -> bool {

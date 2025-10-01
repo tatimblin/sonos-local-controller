@@ -16,11 +16,13 @@ impl TopologyList {
         }
 
         for group in topology.get_groups() {
+            let group_uuid = group.get_coordinator().get_uuid();
+            let group_ip = group.get_coordinator().get_ip();
             let group_item = TopologyItem::from_group(&group);
             items.push(group_item);
 
             for speaker in group.get_speakers() {
-                let speaker_item = TopologyItem::from_speaker(&speaker);
+                let speaker_item = TopologyItem::from_speaker(&group_ip, &group_uuid, &speaker);
                 items.push(speaker_item);
             }
 

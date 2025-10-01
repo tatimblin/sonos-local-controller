@@ -47,14 +47,18 @@ impl SpeakerInfo {
     let device = root.device;
     log::debug!("Successfully parsed device: {:?}", device);
 
-    Ok(SpeakerInfo {
-      ip: String::new(), // This will be set by the caller
-      name: device.name,
-      room_name: device.room_name,
-      uuid: device.udn,
-      model: Self::clean_model_name(&device.model_name),
-      software_version: device.software_version,
-    })
+    if let Some((_, uuid)) = device.udn.split_once(":") {
+      Ok(SpeakerInfo {
+        ip: String::new(), // This will be set by the caller
+        name: device.name,
+        room_name: device.room_name,
+        uuid: uuid.to_string(),
+        model: Self::clean_model_name(&device.model_name),
+        software_version: device.software_version,
+      })
+    } else {
+      Err(SonosError::ParseError(format!("Failed to parse UUID: {}", device.udn)))
+    }
   }
 }
 

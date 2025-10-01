@@ -12,6 +12,7 @@ pub enum TopologyItem {
     ip: String,
     name: String,
     uuid: String,
+    children: Vec<(String, String)>,
     is_last: bool,
     play_state: PlayState,
     volume: Option<u8>,
@@ -19,6 +20,8 @@ pub enum TopologyItem {
   },
   Speaker {
     ip: String,
+    coordinator_ip: String,
+    group_uuid: String,
     uuid: String,
     name: String,
     model: Option<String>,
@@ -47,11 +50,11 @@ impl TopologyItem {
     }
   }
 
-  pub fn get_uuid(&self) -> &str {
+  pub fn get_uuid(&self) -> String {
     match self {
       TopologyItem::Group { uuid, .. }
       | TopologyItem::Speaker { uuid, .. }
-      | TopologyItem::Satellite { uuid, .. } => uuid,
+      | TopologyItem::Satellite { uuid, .. } => uuid.to_string(),
     }
   }
 

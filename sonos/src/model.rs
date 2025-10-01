@@ -10,6 +10,7 @@ pub enum Service {
   RenderingControl(ServiceInfo),
   GroupRenderingControl(ServiceInfo),
   ZoneGroupTopology(ServiceInfo),
+  DeviceProperties(ServiceInfo),
 }
 
 impl Service {
@@ -41,12 +42,20 @@ impl Service {
     })
   }
 
+  pub fn device_properties() -> Self {
+    Service::DeviceProperties(ServiceInfo {
+      endpoint: "DeviceProperties/Control",
+      service: "urn:schemas-upnp-org:service:DeviceProperties:1",
+    })
+  }
+
   pub fn get_info(&self) -> &ServiceInfo {
     match self {
       Service::AVTransport(info) => info,
       Service::RenderingControl(info) => info,
       Service::GroupRenderingControl(info) => info,
       Service::ZoneGroupTopology(info) => info,
+      Service::DeviceProperties(info) => info,
     }
   }
 }
@@ -64,6 +73,7 @@ pub enum Action {
   GetTransportInfo,
   SetAVTransportURI,
   GetPositionInfo,
+  GetZoneInfo,
 }
 
 impl Action {
@@ -88,6 +98,7 @@ impl Action {
       Action::GetTransportInfo => "GetTransportInfo",
       Action::SetAVTransportURI => "SetAVTransportURI",
       Action::GetPositionInfo => "GetPositionInfo",
+      Action::GetZoneInfo => "GetZoneInfo",
     }
   }
 
@@ -108,6 +119,8 @@ impl Action {
       => Service::group_rendering_control(),
       Action::GetZoneGroupState
       => Service::zone_group_topology(),
+      Action::GetZoneInfo
+      => Service::device_properties(),
     }
   }
 }

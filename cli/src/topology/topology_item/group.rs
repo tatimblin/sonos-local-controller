@@ -1,7 +1,6 @@
 use super::{get_play_state_icon, TopologyItem};
 use crate::topology::justify_content::space_between;
 use ratatui::{
-    style::{Color, Style},
     text::Span,
     widgets::ListItem,
 };
@@ -10,13 +9,15 @@ use sonos::{PlayState, SpeakerController, ZoneGroup};
 impl TopologyItem {
     pub fn from_group(group: &ZoneGroup) -> Self {
         let ip = group.get_coordinator().get_ip();
+        let uuid = group.get_coordinator().get_uuid();
         let controller = SpeakerController::new();
         let play_state = controller.get_play_state(&ip).unwrap_or(PlayState::Stopped);
         let volume = controller.get_group_volume(&ip).ok();
 
         TopologyItem::Group {
             ip,
-            uuid: group.id.to_string(),
+            uuid: format!("GROUP:{}", uuid),
+            children: group.get_children(),
             name: group.get_name().to_string(),
             is_last: false,
             play_state,
@@ -51,7 +52,7 @@ impl TopologyItem {
 
     fn get_name(name: &str, count: &usize) -> String {
       if *count > 1 {
-        format!("{} +{}", name, count - 1)
+        format!("{} + {}", name, count - 1)
       } else {
         name.to_string()
       }
@@ -96,6 +97,7 @@ mod tests {
             ip: "192.168.1.100".to_string(),
             name: "Living Room".to_string(),
             uuid: "RINCON_123456".to_string(),
+            children: Vec::new(),
             is_last: false,
             play_state: PlayState::Stopped,
             volume: None,

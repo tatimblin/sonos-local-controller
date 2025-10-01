@@ -4,6 +4,7 @@ use crate::client::Client;
 use crate::error::SonosError;
 use crate::model::{Action, PlayState};
 use crate::speaker::{Device, SpeakerInfo};
+use crate::{ZoneGroup, ZoneGroupMember};
 
 /// A stateless Sonos speaker controller that operates on a specific IP address
 #[derive(Debug, Clone)]
@@ -96,9 +97,11 @@ impl SpeakerController {
     }
 
     pub fn get_group_volume(&self, ip: &str) -> Result<u8, SonosError> {
-      let payload = "<InstanceID>0</InstanceID>";
-      let response = self.client.send_action(ip, Action::GetGroupVolume, payload)?;
-      self.parse_element_u8(&response, "CurrentVolume")
+        let payload = "<InstanceID>0</InstanceID>";
+        let response = self
+            .client
+            .send_action(ip, Action::GetGroupVolume, payload)?;
+        self.parse_element_u8(&response, "CurrentVolume")
     }
 
     /// Set the volume level (0-100)
@@ -121,7 +124,8 @@ impl SpeakerController {
             "<InstanceID>0</InstanceID><Channel>Master</Channel><Adjustment>{}</Adjustment>",
             adjustment
         );
-        let response = self.client
+        let response = self
+            .client
             .send_action(ip, Action::SetRelativeVolume, &payload)?;
         self.parse_element_u8(&response, "NewVolume")
     }

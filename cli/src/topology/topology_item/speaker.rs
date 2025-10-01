@@ -8,14 +8,16 @@ use ratatui::{
 use sonos::{SpeakerController, ZoneGroupMember};
 
 impl TopologyItem {
-  pub fn from_speaker(speaker: &ZoneGroupMember) -> Self {
+  pub fn from_speaker(coordinator_ip: &str, group_uuid: &str, speaker: &ZoneGroupMember) -> Self {
     let ip = speaker.get_ip();
     let controller = SpeakerController::new();
     let volume = controller.get_volume(&ip).ok();
 
     TopologyItem::Speaker {
       ip,
+      coordinator_ip: coordinator_ip.to_string(),
       name: speaker.zone_name.to_string(),
+      group_uuid: format!("GROUP:{}", group_uuid.to_string()),
       uuid: speaker.uuid.to_string(),
       model: None,
       is_last: false,
@@ -90,7 +92,7 @@ mod tests {
   fn test_from_speaker() {
     let zone_group_member = create_test_zone_group_member();
 
-    let speaker = TopologyItem::from_speaker(&zone_group_member);
+    let speaker = TopologyItem::from_speaker("10.0.0.1", "10.0.0.1", &zone_group_member);
 
     assert_eq!(zone_group_member.uuid, speaker.get_uuid());
   }
@@ -99,6 +101,8 @@ mod tests {
   fn test_to_list_item_speaker() {
     let speaker = TopologyItem::Speaker {
       ip: "192.168.1.101".to_string(),
+      coordinator_ip: "10.0.0.1".to_string(),
+      group_uuid: "RINCON_789012:123".to_string(),
       name: "Kitchen".to_string(),
       uuid: "RINCON_789012".to_string(),
       model: Some("Connect:Amp".to_string()),
@@ -115,6 +119,8 @@ mod tests {
   fn test_to_list_item_speaker_last() {
     let speaker = TopologyItem::Speaker {
       ip: "192.168.1.101".to_string(),
+      coordinator_ip: "10.0.0.1".to_string(),
+      group_uuid: "RINCON_789012:123".to_string(),
       name: "Kitchen".to_string(),
       uuid: "RINCON_789012".to_string(),
       model: Some("Connect:Amp".to_string()),

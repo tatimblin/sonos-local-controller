@@ -22,17 +22,17 @@ pub struct ControlView {
 
 impl ControlView {
     pub fn new(store: Arc<Store>) -> Self {
-      let list_widget = store.with_state(|state| {
-        if let Some(topology) = &state.topology {
-            SpeakerList::new(topology)
-        } else {
-            let empty_topology = TopologyList { items: vec![] };
-            SpeakerList::new(&empty_topology)
-        }
-    });
+        let list_widget = store.with_state(|state| {
+            if let Some(topology) = &state.topology {
+                SpeakerList::new(topology)
+            } else {
+                let empty_topology = TopologyList { items: vec![] };
+                SpeakerList::new(&empty_topology)
+            }
+        });
 
-    Self { store, list_widget }
-  }
+        Self { store, list_widget }
+    }
 
     fn get_selected_list(&self) -> String {
         self.store.with_state(|state| {
@@ -97,19 +97,24 @@ impl View for ControlView {
             KeyCode::Left => {
                 let highlighted_item = store.with_state(|state| state.highlight.clone());
                 if let Some(topology_item) = highlighted_item {
+                    let controller = SpeakerController::new();
                     match topology_item {
-                        TopologyItem::Speaker { ip, uuid, .. } => {
-                            let controller = SpeakerController::new();
+                        TopologyItem::Speaker { ip, coordinator_ip, uuid, group_uuid, .. } => {
                             if let Ok(new_volume) = controller.adjust_volume(&ip, -4) {
-                                log::debug!("Volume decreased to {} for speaker {}", new_volume, uuid);
                                 store.dispatch(AppAction::UpdateSpeakerVolume(uuid, new_volume));
                             }
+                            if let Ok(new_group_volume) = controller.get_group_volume(&coordinator_ip) {
+                                store.dispatch(AppAction::UpdateSpeakerVolume(group_uuid, new_group_volume));
+                            }
                         }
-                        TopologyItem::Group { ip, uuid, .. } => {
-                            let controller = SpeakerController::new();
+                        TopologyItem::Group { ip, uuid, children, .. } => {
                             if let Ok(new_volume) = controller.adjust_volume(&ip, -4) {
-                                log::debug!("Volume decreased to {} for group {}", new_volume, uuid);
                                 store.dispatch(AppAction::UpdateSpeakerVolume(uuid, new_volume));
+                            }
+                            for (ip, uuid) in children {
+                                if let Ok(volume) = controller.get_volume(&ip) {
+                                    store.dispatch(AppAction::UpdateSpeakerVolume(uuid, volume));
+                                }
                             }
                         }
                         TopologyItem::Satellite { .. } => {
@@ -123,16 +128,23 @@ impl View for ControlView {
                 if let Some(topology_item) = highlighted_item {
                     let controller = SpeakerController::new();
                     match topology_item {
-                        TopologyItem::Speaker { ip, uuid, .. } => {
+                        TopologyItem::Speaker { ip, coordinator_ip, uuid, group_uuid, .. } => {
                             if let Ok(new_volume) = controller.adjust_volume(&ip, 4) {
-                                log::debug!("Volume increased to {} for speaker {}", new_volume, uuid);
                                 store.dispatch(AppAction::UpdateSpeakerVolume(uuid, new_volume));
                             }
+                            if let Ok(new_group_volume) = controller.get_group_volume(&coordinator_ip) {
+                                store.dispatch(AppAction::UpdateSpeakerVolume(group_uuid, new_group_volume));
+                            }
                         }
-                        TopologyItem::Group { ip, uuid, .. } => {
+                        TopologyItem::Group { ip, uuid, children, .. } => {
                             if let Ok(new_volume) = controller.adjust_volume(&ip, 4) {
-                                log::debug!("Volume increased to {} for group {}", new_volume, uuid);
                                 store.dispatch(AppAction::UpdateSpeakerVolume(uuid, new_volume));
+                            }
+                            for (ip, uuid) in children {
+                                log::debug!("Raise volume for {} {}", uuid, ip);
+                                if let Ok(volume) = controller.get_volume(&ip) {
+                                    store.dispatch(AppAction::UpdateSpeakerVolume(uuid, volume));
+                                }
                             }
                         }
                         TopologyItem::Satellite { .. } => {
