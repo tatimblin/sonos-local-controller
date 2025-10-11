@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType>
+    <friendlyName>Kitchen</friendlyName>
+    <manufacturer>Sonos, Inc.</manufacturer>
+    <modelName>Sonos Play:1</modelName>
+    <UDN>uuid:RINCON_B8E937654321</UDN>
+    <roomName>Kitchen</roomName>
+  </device>
+</root>

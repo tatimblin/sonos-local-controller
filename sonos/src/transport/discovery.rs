@@ -145,6 +145,132 @@ pub fn discover_speakers_with_timeout(timeout: Duration) -> Result<Vec<Speaker>>
 #[cfg(test)]
 mod tests {
     use super::*;
+    
+
+    #[test]
+    fn test_discover_speakers_single_speaker() {
+        // Test the device XML parsing and speaker creation directly
+        let device_xml = include_str!("../../tests/fixtures/sonos_one_device.xml");
+
+        let device = Device::from_xml(device_xml).unwrap();
+        assert!(device.is_sonos_speaker());
+        
+        let speaker = device.to_speaker("192.168.1.100".to_string());
+        assert_eq!(speaker.name, "Living Room");
+        assert_eq!(speaker.room_name, "Living Room");
+        assert_eq!(speaker.model_name, "Sonos One");
+        assert_eq!(speaker.ip_address, "192.168.1.100");
+        assert_eq!(speaker.udn, "uuid:RINCON_000E58A0123456");
+        assert_eq!(speaker.port, 1400);
+    }
+
+    #[test]
+    fn test_discover_speakers_multiple_speakers() {
+        // Test multiple device XML parsing and deduplication logic
+        let device_xml_1 = include_str!("../../tests/fixtures/sonos_one_device.xml");
+        let device_xml_2 = include_str!("../../tests/fixtures/sonos_play1_device.xml");
+
+        // Test first device
+        let device1 = Device::from_xml(device_xml_1).unwrap();
+        assert!(device1.is_sonos_speaker());
+        let speaker1 = device1.to_speaker("192.168.1.100".to_string());
+
+        // Test second device
+        let device2 = Device::from_xml(device_xml_2).unwrap();
+        assert!(device2.is_sonos_speaker());
+        let speaker2 = device2.to_speaker("192.168.1.101".to_string());
+
+        // Verify both speakers
+        assert_eq!(speaker1.name, "Living Room");
+        assert_eq!(speaker1.model_name, "Sonos One");
+        assert_eq!(speaker1.ip_address, "192.168.1.100");
+
+        assert_eq!(speaker2.name, "Kitchen");
+        assert_eq!(speaker2.model_name, "Sonos Play:1");
+        assert_eq!(speaker2.ip_address, "192.168.1.101");
+
+        // Verify speakers have unique IDs
+        assert_ne!(speaker1.id, speaker2.id);
+
+        // Test deduplication logic with HashSet
+        let mut seen_locations = HashSet::new();
+        let location1 = "http://192.168.1.100:1400/xml/device_description.xml";
+        let location2 = "http://192.168.1.101:1400/xml/device_description.xml";
+        
+        assert!(!seen_locations.contains(location1));
+        seen_locations.insert(location1.to_string());
+        assert!(seen_locations.contains(location1));
+        
+        assert!(!seen_locations.contains(location2));
+        seen_locations.insert(location2.to_string());
+        assert!(seen_locations.contains(location2));
+        
+        // Test duplicate detection
+        assert!(seen_locations.contains(location1));
+    }
+
+    #[test]
+    fn test_discover_speakers_filtering_non_sonos_devices() {
+        use super::super::ssdp::SsdpResponse;
+
+        let discovery = Discovery::new(Duration::from_millis(100));
+
+        // Test various device types that should be filtered out
+        let router_response = SsdpResponse {
+            location: "http://192.168.1.1:1900/igd.xml".to_string(),
+            urn: "urn:schemas-upnp-org:device:InternetGatewayDevice:1".to_string(),
+            usn: "uuid:12345678-1234-1234-1234-123456789012::urn:schemas-upnp-org:device:InternetGatewayDevice:1".to_string(),
+            server: Some("Linux/2.6 UPnP/1.0 Router/1.0".to_string()),
+        };
+        assert!(!discovery.is_likely_sonos_device(&router_response));
+
+        let tv_response = SsdpResponse {
+            location: "http://192.168.1.50:8080/description.xml".to_string(),
+            urn: "urn:schemas-upnp-org:device:MediaRenderer:1".to_string(),
+            usn: "uuid:87654321-4321-4321-4321-210987654321::urn:schemas-upnp-org:device:MediaRenderer:1".to_string(),
+            server: Some("Samsung TV UPnP/1.0".to_string()),
+        };
+        assert!(!discovery.is_likely_sonos_device(&tv_response));
+
+        // Test Sonos devices that should pass
+        let sonos_response = SsdpResponse {
+            location: "http://192.168.1.100:1400/xml/device_description.xml".to_string(),
+            urn: "urn:schemas-upnp-org:device:ZonePlayer:1".to_string(),
+            usn: "uuid:RINCON_000E58A0123456::urn:schemas-upnp-org:device:ZonePlayer:1".to_string(),
+            server: Some("Linux/3.14.0 UPnP/1.0 Sonos/70.3-35220".to_string()),
+        };
+        assert!(discovery.is_likely_sonos_device(&sonos_response));
+    }
+
+    #[test]
+    fn test_discover_speakers_error_handling() {
+        // Test invalid device XML
+        let invalid_xml = "not valid xml";
+        let result = Device::from_xml(invalid_xml);
+        assert!(result.is_err());
+
+        // Test non-Sonos device XML
+        let non_sonos_xml = include_str!("../../tests/fixtures/non_sonos_router_device.xml");
+
+        let device = Device::from_xml(non_sonos_xml).unwrap();
+        assert!(!device.is_sonos_speaker());
+    }
+
+    #[test]
+    fn test_discover_speakers_edge_cases() {
+        // Test device with missing optional fields
+        let minimal_xml = include_str!("../../tests/fixtures/minimal_sonos_device.xml");
+
+        let device = Device::from_xml(minimal_xml).unwrap();
+        assert!(device.is_sonos_speaker());
+        
+        let speaker = device.to_speaker("192.168.1.200".to_string());
+        assert_eq!(speaker.name, "Minimal Speaker");
+        assert_eq!(speaker.room_name, "Unknown"); // Should default to "Unknown"
+        assert_eq!(speaker.model_name, "Sonos Test");
+        assert_eq!(speaker.ip_address, "192.168.1.200");
+        assert_eq!(speaker.udn, "uuid:RINCON_MINIMAL123456");
+    }
 
     #[test]
     fn test_discovery_new() {

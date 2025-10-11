@@ -90,17 +90,7 @@ mod tests {
 
   #[test]
   fn test_device_from_xml() {
-    let xml = r#"<?xml version="1.0"?>
-      <root xmlns="urn:schemas-upnp-org:device-1-0">
-        <device>
-          <deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType>
-          <friendlyName>Living Room</friendlyName>
-          <manufacturer>Sonos, Inc.</manufacturer>
-          <modelName>Sonos One</modelName>
-          <UDN>uuid:RINCON_000E58A0123456</UDN>
-          <roomName>Living Room</roomName>
-        </device>
-      </root>"#;
+    let xml = include_str!("../../tests/fixtures/sonos_one_device.xml");
 
     let device = Device::from_xml(xml).unwrap();
 
