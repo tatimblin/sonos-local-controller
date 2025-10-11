@@ -5,24 +5,4 @@ authors = []
 edition = "2021"
 
 [dependencies]
-failure = "0.1"
-regex = "1"
-lazy_static = "1"
-ureq = "2.10.1"
-serde = "1.0.213"
-serde_derive = "1.0.213"
-serde-xml-rs = "0.6.0"
-url = "2.5.2"
-xmltree = "0.11"
-html-escape = "0.2"
-log = "0.4"
-simplelog = "0.12"
-# Conditional
-mockall = { version = "0.13", optional = true }
-
-[dev-dependencies]
-mockall = "0.13"
-
-[features]
-default = []
-mock = ["mockall"]
+reqwest = { version = "0.12.23", features = ["blocking"] }
