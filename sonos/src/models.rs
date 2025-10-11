@@ -1,6 +1,23 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SpeakerId(u32);
 
+impl SpeakerId {
+    /// Create a SpeakerId from a UDN string
+    pub fn from_udn(udn: &str) -> Self {
+        // Extract the RINCON part and create a hash
+        let hash = if let Some(rincon_part) = udn.strip_prefix("uuid:RINCON_") {
+            let rincon_id = rincon_part.split("::").next().unwrap_or(rincon_part);
+            // Simple hash of the RINCON ID
+            rincon_id.chars().fold(0u32, |acc, c| acc.wrapping_mul(31).wrapping_add(c as u32))
+        } else {
+            // Fallback hash for non-RINCON UDNs
+            udn.chars().fold(0u32, |acc, c| acc.wrapping_mul(31).wrapping_add(c as u32))
+        };
+        
+        SpeakerId(hash)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Speaker {
     pub id: SpeakerId,

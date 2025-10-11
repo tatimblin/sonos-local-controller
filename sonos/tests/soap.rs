@@ -8,7 +8,8 @@ fn test_soap_client_construction() -> Result<()> {
 }
 
 #[test]
-fn test_get_info() {
+fn test_soap_client_get_zone_info() {
+  // TODO a global variable should be set that finds a sonos ip
   let device_url = std::env::var("SONOS_DEVICE_URL")
     .unwrap_or_else(|_| "http://10.0.4.36:1400".to_string());
   let duration = std::time::Duration::from_secs(5);
