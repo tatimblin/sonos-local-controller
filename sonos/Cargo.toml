@@ -17,3 +17,8 @@ path = "tests/discovery.rs"
 [[test]]
 name = "soap"  
 path = "tests/soap.rs"
+
+# Examples
+[[example]]
+name = "state-monitor"
+path = "examples/state-monitor.rs"
