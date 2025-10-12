@@ -40,7 +40,6 @@ pub struct Speaker {
     pub ip_address: String,
     pub port: u16,
     pub model_name: String,
-    pub group_id: Option<GroupId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +59,7 @@ pub struct SpeakerState {
     pub position_ms: u64,
     pub duration_ms: u64,
     pub is_coordinator: bool,
+    pub group_id: Option<GroupId>,
 }
 
 #[derive(Debug, Clone)]

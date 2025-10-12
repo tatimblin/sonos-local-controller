@@ -61,7 +61,7 @@ impl ZoneGroupsService {
                 crate::error::SonosError::InvalidState("No coordinator in zone group".to_string())
             })?;
 
-        let coordinator_id = SpeakerId::from_udn(&coordinator_udn);
+        let coordinator_id = SpeakerId::from_udn(&Self::uuid_to_udn(&coordinator_udn));
 
         let mut members = vec![coordinator_id];
 
@@ -73,7 +73,7 @@ impl ZoneGroupsService {
                 let member_xml = &zone_xml[absolute_start..absolute_end];
 
                 if let Some(uuid) = Self::extract_attribute(member_xml, "UUID") {
-                    let member_id = SpeakerId::from_udn(&uuid);
+                    let member_id = SpeakerId::from_udn(&Self::uuid_to_udn(&uuid));
                     if member_id != coordinator_id {
                         members.push(member_id);
                     }
@@ -109,6 +109,39 @@ impl ZoneGroupsService {
             .replace("&apos;", "'")
             .replace("&amp;", "&") // This should be last to avoid double-decoding
     }
+
+    /// Convert a UUID from zone group topology to full UDN format
+    /// Converts "RINCON_C43875CA135801400" to "uuid:RINCON_C43875CA135801400::1"
+    fn uuid_to_udn(uuid: &str) -> String {
+        if uuid.starts_with("RINCON_") {
+            format!("uuid:{}::1", uuid)
+        } else {
+            // If it's already in UDN format or some other format, return as-is
+            uuid.to_string()
+        }
+    }
+}
+
+/// Convenience function for fetching zone groups from a speaker with default timeout
+pub fn get_zone_groups_from_speaker(speaker: &crate::models::Speaker) -> Result<Vec<Group>> {
+    use crate::transport::soap::SoapClient;
+    use std::time::Duration;
+    
+    let soap_client = SoapClient::new(Duration::from_secs(5))?;
+    let device_url = format!("http://{}:{}", speaker.ip_address, speaker.port);
+    ZoneGroupsService::get_zone_group_state(&soap_client, &device_url)
+}
+
+/// Convenience function for fetching zone groups from a speaker with custom timeout
+pub fn get_zone_groups_from_speaker_with_timeout(
+    speaker: &crate::models::Speaker,
+    timeout: std::time::Duration,
+) -> Result<Vec<Group>> {
+    use crate::transport::soap::SoapClient;
+    
+    let soap_client = SoapClient::new(timeout)?;
+    let device_url = format!("http://{}:{}", speaker.ip_address, speaker.port);
+    ZoneGroupsService::get_zone_group_state(&soap_client, &device_url)
 }
 
 #[cfg(test)]
@@ -142,6 +175,27 @@ mod tests {
     }
 
     #[test]
+    fn test_uuid_to_udn() {
+        // Test RINCON UUID conversion
+        assert_eq!(
+            ZoneGroupsService::uuid_to_udn("RINCON_C43875CA135801400"),
+            "uuid:RINCON_C43875CA135801400::1"
+        );
+
+        // Test already formatted UDN (should return as-is)
+        assert_eq!(
+            ZoneGroupsService::uuid_to_udn("uuid:RINCON_C43875CA135801400::1"),
+            "uuid:RINCON_C43875CA135801400::1"
+        );
+
+        // Test non-RINCON UUID (should return as-is)
+        assert_eq!(
+            ZoneGroupsService::uuid_to_udn("some-other-uuid"),
+            "some-other-uuid"
+        );
+    }
+
+    #[test]
     fn test_extract_attribute_with_member() {
         let xml = r#"<ZoneGroupMember UUID="RINCON_C43875CA135801400" Location="http://192.168.4.65:1400/xml/device_description.xml" ZoneName="Roam 2"/>"#;
 
@@ -169,7 +223,7 @@ mod tests {
         assert!(result.is_ok());
 
         let group = result.unwrap();
-        let expected_coordinator = SpeakerId::from_udn("RINCON_C43875CA135801400");
+        let expected_coordinator = SpeakerId::from_udn("uuid:RINCON_C43875CA135801400::1");
 
         assert_eq!(group.coordinator, expected_coordinator);
         assert_eq!(group.id, GroupId::from_coordinator(expected_coordinator));
@@ -185,7 +239,7 @@ mod tests {
         assert!(result.is_ok());
 
         let group = result.unwrap();
-        let expected_coordinator = SpeakerId::from_udn("RINCON_5CAAFDAE58BD01400");
+        let expected_coordinator = SpeakerId::from_udn("uuid:RINCON_5CAAFDAE58BD01400::1");
 
         assert_eq!(group.coordinator, expected_coordinator);
         assert_eq!(group.id, GroupId::from_coordinator(expected_coordinator));
@@ -212,14 +266,14 @@ mod tests {
         assert_eq!(groups.len(), 3); // Should parse 3 zone groups from the sample
 
         // Verify first group (Roam 2)
-        let roam_coordinator = SpeakerId::from_udn("RINCON_C43875CA135801400");
+        let roam_coordinator = SpeakerId::from_udn("uuid:RINCON_C43875CA135801400::1");
         let roam_group = groups.iter().find(|g| g.coordinator == roam_coordinator);
         assert!(roam_group.is_some());
         let roam_group = roam_group.unwrap();
         assert_eq!(roam_group.members.len(), 1);
 
         // Verify second group (Living Room)
-        let living_room_coordinator = SpeakerId::from_udn("RINCON_804AF2AA2FA201400");
+        let living_room_coordinator = SpeakerId::from_udn("uuid:RINCON_804AF2AA2FA201400::1");
         let living_room_group = groups
             .iter()
             .find(|g| g.coordinator == living_room_coordinator);
@@ -228,7 +282,7 @@ mod tests {
         assert_eq!(living_room_group.members.len(), 1);
 
         // Verify third group (Basement with satellites)
-        let basement_coordinator = SpeakerId::from_udn("RINCON_5CAAFDAE58BD01400");
+        let basement_coordinator = SpeakerId::from_udn("uuid:RINCON_5CAAFDAE58BD01400::1");
         let basement_group = groups
             .iter()
             .find(|g| g.coordinator == basement_coordinator);
@@ -271,9 +325,9 @@ mod tests {
         assert_eq!(groups.len(), 1);
 
         let group = &groups[0];
-        let coordinator_id = SpeakerId::from_udn("RINCON_COORDINATOR01400");
-        let member1_id = SpeakerId::from_udn("RINCON_MEMBER001400");
-        let member2_id = SpeakerId::from_udn("RINCON_MEMBER002400");
+        let coordinator_id = SpeakerId::from_udn("uuid:RINCON_COORDINATOR01400::1");
+        let member1_id = SpeakerId::from_udn("uuid:RINCON_MEMBER001400::1");
+        let member2_id = SpeakerId::from_udn("uuid:RINCON_MEMBER002400::1");
 
         assert_eq!(group.coordinator, coordinator_id);
         assert_eq!(group.members.len(), 3);

@@ -15,11 +15,12 @@ impl StateCache {
         }
     }
 
-    pub fn initialize(&self, speakers: Vec<Speaker>) {
-        let mut cache = self.speakers.write().unwrap();
+    pub fn initialize(&self, speakers: Vec<Speaker>, groups: Vec<Group>) {
+        // Initialize speakers
+        let mut speaker_cache = self.speakers.write().unwrap();
         for speaker in speakers {
             let id = speaker.id;
-            cache.insert(
+            speaker_cache.insert(
                 id,
                 SpeakerState {
                     speaker,
@@ -29,9 +30,14 @@ impl StateCache {
                     position_ms: 0,
                     duration_ms: 0,
                     is_coordinator: false,
+                    group_id: None,
                 },
             );
         }
+        drop(speaker_cache); // Release the lock early
+
+        // Initialize groups
+        self.set_groups(groups);
     }
 
     pub fn get_speaker(&self, id: SpeakerId) -> Option<SpeakerState> {
@@ -101,25 +107,25 @@ impl StateCache {
         self.groups.read().unwrap().values().cloned().collect()
     }
 
-    pub fn update_groups(&self, groups: Vec<Group>) {
+    fn set_groups(&self, groups: Vec<Group>) {
         let mut group_cache = self.groups.write().unwrap();
         group_cache.clear();
-        
+
         for group in groups {
             group_cache.insert(group.id, group);
         }
 
         if let Ok(mut speakers) = self.speakers.write() {
             for speaker_state in speakers.values_mut() {
-                speaker_state.speaker.group_id = None;
-                speaker_state.speaker.is_coordinator = false;
+                speaker_state.group_id = None;
+                speaker_state.is_coordinator = false;
             }
 
             for group in group_cache.values() {
                 for &member_id in &group.members {
                     if let Some(speaker_state) = speakers.get_mut(&member_id) {
-                        speaker_state.speaker.group_id = Some(group.id);
-                        speaker_state.speaker.is_coordinator = member_id == group.coordinator;
+                        speaker_state.group_id = Some(group.id);
+                        speaker_state.is_coordinator = member_id == group.coordinator;
                     }
                 }
             }
@@ -131,7 +137,7 @@ impl StateCache {
             .read()
             .unwrap()
             .values()
-            .filter(|s| s.speaker.group_id == Some(group_id))
+            .filter(|s| s.group_id == Some(group_id))
             .cloned()
             .collect()
     }
@@ -141,7 +147,7 @@ impl StateCache {
             .read()
             .unwrap()
             .values()
-            .find(|s| s.speaker.group_id == Some(group_id) && s.speaker.is_coordinator)
+            .find(|s| s.group_id == Some(group_id) && s.is_coordinator)
             .cloned()
     }
 }
@@ -179,8 +185,6 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Sonos One".to_string(),
-            group_id: None,
-            is_coordinator: false,
         };
 
         let speaker2 = Speaker {
@@ -191,11 +195,9 @@ mod tests {
             ip_address: "192.168.1.101".to_string(),
             port: 1400,
             model_name: "Sonos Play:1".to_string(),
-            group_id: None,
-            is_coordinator: false,
         };
 
-        cache.initialize(vec![speaker1.clone(), speaker2.clone()]);
+        cache.initialize(vec![speaker1.clone(), speaker2.clone()], vec![]);
         (cache, speaker1, speaker2)
     }
 
@@ -219,8 +221,6 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Sonos One".to_string(),
-            group_id: None,
-            is_coordinator: false,
         };
 
         let speaker2 = Speaker {
@@ -231,12 +231,10 @@ mod tests {
             ip_address: "192.168.1.101".to_string(),
             port: 1400,
             model_name: "Sonos Play:1".to_string(),
-            group_id: None,
-            is_coordinator: false,
         };
 
         let speakers = vec![speaker1.clone(), speaker2.clone()];
-        cache.initialize(speakers);
+        cache.initialize(speakers, vec![]);
 
         let all_speakers = cache.get_all_speakers();
         assert_eq!(all_speakers.len(), 2);
@@ -354,14 +352,37 @@ mod tests {
     }
 
     #[test]
-    fn test_update_groups() {
-        let (cache, speaker1, speaker2) = create_test_cache();
+    fn test_group_functionality() {
+        let cache = StateCache::new();
+
+        let speaker1 = Speaker {
+            id: SpeakerId::from_udn("uuid:RINCON_123456789::1"),
+            udn: "uuid:RINCON_123456789::1".to_string(),
+            name: "Living Room".to_string(),
+            room_name: "Living Room".to_string(),
+            ip_address: "192.168.1.100".to_string(),
+            port: 1400,
+            model_name: "Sonos One".to_string(),
+        };
+
+        let speaker2 = Speaker {
+            id: SpeakerId::from_udn("uuid:RINCON_987654321::1"),
+            udn: "uuid:RINCON_987654321::1".to_string(),
+            name: "Kitchen Speaker".to_string(),
+            room_name: "Kitchen".to_string(),
+            ip_address: "192.168.1.101".to_string(),
+            port: 1400,
+            model_name: "Sonos Play:1".to_string(),
+        };
 
         // Create a group with speaker1 as coordinator and speaker2 as member
         let mut group = Group::new(speaker1.id);
         group.add_member(speaker2.id);
 
-        cache.update_groups(vec![group.clone()]);
+        cache.initialize(
+            vec![speaker1.clone(), speaker2.clone()],
+            vec![group.clone()],
+        );
 
         // Verify group was added
         let retrieved_group = cache.get_group(group.id).unwrap();
@@ -372,26 +393,50 @@ mod tests {
 
         // Verify speakers were updated with group info
         let speaker1_state = cache.get_speaker(speaker1.id).unwrap();
-        assert_eq!(speaker1_state.speaker.group_id, Some(group.id));
-        assert_eq!(speaker1_state.speaker.is_coordinator, true);
+        assert_eq!(speaker1_state.group_id, Some(group.id));
+        assert_eq!(speaker1_state.is_coordinator, true);
 
         let speaker2_state = cache.get_speaker(speaker2.id).unwrap();
-        assert_eq!(speaker2_state.speaker.group_id, Some(group.id));
-        assert_eq!(speaker2_state.speaker.is_coordinator, false);
+        assert_eq!(speaker2_state.group_id, Some(group.id));
+        assert_eq!(speaker2_state.is_coordinator, false);
     }
 
     #[test]
     fn test_get_speakers_in_group() {
-        let (cache, speaker1, speaker2) = create_test_cache();
+        let cache = StateCache::new();
+
+        let speaker1 = Speaker {
+            id: SpeakerId::from_udn("uuid:RINCON_123456789::1"),
+            udn: "uuid:RINCON_123456789::1".to_string(),
+            name: "Living Room".to_string(),
+            room_name: "Living Room".to_string(),
+            ip_address: "192.168.1.100".to_string(),
+            port: 1400,
+            model_name: "Sonos One".to_string(),
+        };
+
+        let speaker2 = Speaker {
+            id: SpeakerId::from_udn("uuid:RINCON_987654321::1"),
+            udn: "uuid:RINCON_987654321::1".to_string(),
+            name: "Kitchen Speaker".to_string(),
+            room_name: "Kitchen".to_string(),
+            ip_address: "192.168.1.101".to_string(),
+            port: 1400,
+            model_name: "Sonos Play:1".to_string(),
+        };
 
         let mut group = Group::new(speaker1.id);
         group.add_member(speaker2.id);
-        cache.update_groups(vec![group.clone()]);
+        cache.initialize(
+            vec![speaker1.clone(), speaker2.clone()],
+            vec![group.clone()],
+        );
 
         let group_speakers = cache.get_speakers_in_group(group.id);
         assert_eq!(group_speakers.len(), 2);
-        
-        let speaker_names: Vec<String> = group_speakers.iter()
+
+        let speaker_names: Vec<String> = group_speakers
+            .iter()
             .map(|s| s.speaker.name.clone())
             .collect();
         assert!(speaker_names.contains(&"Living Room".to_string()));
@@ -400,27 +445,128 @@ mod tests {
 
     #[test]
     fn test_get_group_coordinator() {
-        let (cache, speaker1, speaker2) = create_test_cache();
+        let cache = StateCache::new();
+
+        let speaker1 = Speaker {
+            id: SpeakerId::from_udn("uuid:RINCON_123456789::1"),
+            udn: "uuid:RINCON_123456789::1".to_string(),
+            name: "Living Room".to_string(),
+            room_name: "Living Room".to_string(),
+            ip_address: "192.168.1.100".to_string(),
+            port: 1400,
+            model_name: "Sonos One".to_string(),
+        };
+
+        let speaker2 = Speaker {
+            id: SpeakerId::from_udn("uuid:RINCON_987654321::1"),
+            udn: "uuid:RINCON_987654321::1".to_string(),
+            name: "Kitchen Speaker".to_string(),
+            room_name: "Kitchen".to_string(),
+            ip_address: "192.168.1.101".to_string(),
+            port: 1400,
+            model_name: "Sonos Play:1".to_string(),
+        };
 
         let mut group = Group::new(speaker1.id);
         group.add_member(speaker2.id);
-        cache.update_groups(vec![group.clone()]);
+        cache.initialize(
+            vec![speaker1.clone(), speaker2.clone()],
+            vec![group.clone()],
+        );
 
         let coordinator = cache.get_group_coordinator(group.id).unwrap();
         assert_eq!(coordinator.speaker.id, speaker1.id);
-        assert_eq!(coordinator.speaker.is_coordinator, true);
+        assert_eq!(coordinator.is_coordinator, true);
     }
 
     #[test]
     fn test_get_all_groups() {
-        let (cache, speaker1, speaker2) = create_test_cache();
+        let cache = StateCache::new();
+
+        let speaker1 = Speaker {
+            id: SpeakerId::from_udn("uuid:RINCON_123456789::1"),
+            udn: "uuid:RINCON_123456789::1".to_string(),
+            name: "Living Room".to_string(),
+            room_name: "Living Room".to_string(),
+            ip_address: "192.168.1.100".to_string(),
+            port: 1400,
+            model_name: "Sonos One".to_string(),
+        };
+
+        let speaker2 = Speaker {
+            id: SpeakerId::from_udn("uuid:RINCON_987654321::1"),
+            udn: "uuid:RINCON_987654321::1".to_string(),
+            name: "Kitchen Speaker".to_string(),
+            room_name: "Kitchen".to_string(),
+            ip_address: "192.168.1.101".to_string(),
+            port: 1400,
+            model_name: "Sonos Play:1".to_string(),
+        };
 
         let group1 = Group::new(speaker1.id);
         let group2 = Group::new(speaker2.id);
-        
-        cache.update_groups(vec![group1.clone(), group2.clone()]);
+
+        cache.initialize(
+            vec![speaker1.clone(), speaker2.clone()],
+            vec![group1.clone(), group2.clone()],
+        );
 
         let all_groups = cache.get_all_groups();
         assert_eq!(all_groups.len(), 2);
+    }
+
+    #[test]
+    fn test_initialize_with_groups() {
+        let cache = StateCache::new();
+
+        let speaker1 = Speaker {
+            id: SpeakerId::from_udn("uuid:RINCON_123456789::1"),
+            udn: "uuid:RINCON_123456789::1".to_string(),
+            name: "Living Room".to_string(),
+            room_name: "Living Room".to_string(),
+            ip_address: "192.168.1.100".to_string(),
+            port: 1400,
+            model_name: "Sonos One".to_string(),
+        };
+
+        let speaker2 = Speaker {
+            id: SpeakerId::from_udn("uuid:RINCON_987654321::1"),
+            udn: "uuid:RINCON_987654321::1".to_string(),
+            name: "Kitchen".to_string(),
+            room_name: "Kitchen".to_string(),
+            ip_address: "192.168.1.101".to_string(),
+            port: 1400,
+            model_name: "Sonos Play:1".to_string(),
+        };
+
+        // Create a group with speaker1 as coordinator and speaker2 as member
+        let mut group = Group::new(speaker1.id);
+        group.add_member(speaker2.id);
+
+        let speakers = vec![speaker1.clone(), speaker2.clone()];
+        let groups = vec![group.clone()];
+
+        cache.initialize(speakers, groups);
+
+        // Verify speakers were initialized
+        let all_speakers = cache.get_all_speakers();
+        assert_eq!(all_speakers.len(), 2);
+
+        // Verify groups were initialized
+        let all_groups = cache.get_all_groups();
+        assert_eq!(all_groups.len(), 1);
+
+        let retrieved_group = cache.get_group(group.id).unwrap();
+        assert_eq!(retrieved_group.coordinator, speaker1.id);
+        assert_eq!(retrieved_group.members.len(), 2);
+
+        // Verify speakers have correct group information
+        let speaker1_state = cache.get_speaker(speaker1.id).unwrap();
+        assert_eq!(speaker1_state.group_id, Some(group.id));
+        assert_eq!(speaker1_state.is_coordinator, true);
+
+        let speaker2_state = cache.get_speaker(speaker2.id).unwrap();
+        assert_eq!(speaker2_state.group_id, Some(group.id));
+        assert_eq!(speaker2_state.is_coordinator, false);
     }
 }
