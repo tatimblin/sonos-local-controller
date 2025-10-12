@@ -3,3 +3,4 @@
 
 pub mod discovery;
 pub mod soap;
+pub mod zone_groups;
