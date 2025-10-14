@@ -23,6 +23,9 @@ pub enum SubscriptionError {
     #[error("Service not supported by device: {service:?}")]
     ServiceNotSupported { service: ServiceType },
 
+    #[error("Speaker is likely a satellite/bonded speaker and cannot accept individual subscriptions")]
+    SatelliteSpeaker,
+
     #[error("Invalid subscription configuration: {0}")]
     InvalidConfiguration(String),
 

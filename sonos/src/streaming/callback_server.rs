@@ -80,10 +80,10 @@ impl CallbackServer {
                     .and(with_router)
                     .and_then(handle_notify_request);
 
-                // Create the server
+                // Create the server - bind to all interfaces so Sonos devices can reach it
                 let (_addr, server) = warp::serve(notify_route)
                     .bind_with_graceful_shutdown(
-                        SocketAddr::from(([127, 0, 0, 1], port)),
+                        SocketAddr::from(([0, 0, 0, 0], port)),
                         async move {
                             shutdown_rx.recv().await;
                         }
@@ -140,12 +140,36 @@ impl CallbackServer {
 
     /// Get the base callback URL for this server
     pub fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
+        // Try to get the local IP address instead of using localhost
+        match Self::get_local_ip() {
+            Some(ip) => format!("http://{}:{}", ip, self.port),
+            None => {
+                log::warn!("Could not determine local IP address, using localhost (this may not work with Sonos devices)");
+                format!("http://127.0.0.1:{}", self.port)
+            }
+        }
+    }
+
+    /// Get the local IP address of this machine
+    fn get_local_ip() -> Option<String> {
+        use std::net::TcpStream;
+        
+        // Try to connect to a well-known address to determine our local IP
+        // We use Google's DNS server as a target, but we don't actually send data
+        if let Ok(stream) = TcpStream::connect("8.8.8.8:80") {
+            if let Ok(local_addr) = stream.local_addr() {
+                return Some(local_addr.ip().to_string());
+            }
+        }
+        
+        // Fallback: try to find a non-loopback interface
+        // This is a simplified approach - in production you might want to use a crate like `local-ip-address`
+        None
     }
 
     /// Check if a port is available for binding
     fn is_port_available(port: u16) -> bool {
-        std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+        std::net::TcpListener::bind(("0.0.0.0", port)).is_ok()
     }
 
     /// Check if the server is running
@@ -481,7 +505,7 @@ mod tests {
         let server = CallbackServer::new((8080, 8090), tx).unwrap();
         
         let base_url = server.base_url();
-        assert!(base_url.starts_with("http://127.0.0.1:"));
+        assert!(base_url.starts_with("http://"));
         assert!(base_url.contains(&server.port().to_string()));
     }
 

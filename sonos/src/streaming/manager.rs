@@ -55,16 +55,20 @@ impl SubscriptionManager {
             .map_err(|e| SubscriptionError::InvalidConfiguration(e))?;
 
         // Create callback server for receiving UPnP events
+        println!("🌐 Creating callback server for port range {:?}...", config.callback_port_range);
         let (raw_event_sender, raw_event_receiver) = tokio_mpsc::unbounded_channel();
         let mut callback_server =
             CallbackServer::new(config.callback_port_range, raw_event_sender.clone())
                 .map_err(|e| SubscriptionError::CallbackServerError(e.to_string()))?;
 
+        println!("🚀 Starting callback server on port {}...", callback_server.port());
         // Start the callback server
         callback_server
             .start()
             .map_err(|e| SubscriptionError::CallbackServerError(e.to_string()))?;
 
+        println!("✅ Callback server started successfully");
+        println!("📡 Base URL: {}", callback_server.base_url());
         log::info!("Callback server started on port {}", callback_server.port());
 
         let speakers = Arc::new(RwLock::new(HashMap::new()));
@@ -279,9 +283,12 @@ impl SubscriptionManager {
         speaker: &Speaker,
     ) -> SubscriptionResult<Vec<SubscriptionId>> {
         let mut subscription_ids = Vec::new();
+        let mut satellite_errors = 0;
+        let mut total_attempts = 0;
         let subscription_config = SubscriptionConfig::from_stream_config(&self.config);
 
         for service_type in &self.config.enabled_services {
+            total_attempts += 1;
             match self.create_subscription_for_service(
                 speaker,
                 *service_type,
@@ -294,6 +301,14 @@ impl SubscriptionManager {
                         service_type,
                         subscription_id,
                         speaker.name
+                    );
+                }
+                Err(SubscriptionError::SatelliteSpeaker) => {
+                    satellite_errors += 1;
+                    log::debug!(
+                        "Speaker {} returned 503 for {:?} service (likely satellite speaker)",
+                        speaker.name,
+                        service_type
                     );
                 }
                 Err(e) => {
@@ -316,6 +331,11 @@ impl SubscriptionManager {
                     }
                 }
             }
+        }
+
+        // If all services returned 503 (satellite speaker error), propagate that error
+        if satellite_errors == total_attempts && total_attempts > 0 {
+            return Err(SubscriptionError::SatelliteSpeaker);
         }
 
         Ok(subscription_ids)
@@ -345,6 +365,28 @@ impl SubscriptionManager {
                     return Ok(subscription_id);
                 }
                 Err(e) => {
+                    // Don't retry certain error types that will never succeed
+                    match &e {
+                        SubscriptionError::SatelliteSpeaker => {
+                            log::debug!(
+                                "Speaker {} is a satellite speaker, not retrying",
+                                speaker.name
+                            );
+                            return Err(e);
+                        }
+                        SubscriptionError::ServiceNotSupported { .. } => {
+                            log::debug!(
+                                "Service {:?} not supported by {}, not retrying",
+                                service_type,
+                                speaker.name
+                            );
+                            return Err(e);
+                        }
+                        _ => {
+                            // For other errors, continue with retry logic
+                        }
+                    }
+
                     if attempt < max_attempts - 1 {
                         let backoff_duration =
                             Self::calculate_backoff_duration(attempt, base_backoff);
@@ -390,6 +432,8 @@ impl SubscriptionManager {
         // Generate subscription ID and callback URL
         let subscription_id = SubscriptionId::new();
         let callback_url = self.get_callback_url(subscription_id);
+        
+        println!("📡 Creating subscription with callback URL: {}", callback_url);
 
         // Create the appropriate subscription based on service type
         let mut subscription: Box<dyn ServiceSubscription> = match service_type {

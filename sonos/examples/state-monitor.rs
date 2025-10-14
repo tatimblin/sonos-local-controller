@@ -1,8 +1,10 @@
 use sonos::{
-    discover_speakers_with_timeout, get_zone_groups_from_speaker, Group, PlaybackState, SonosError,
-    SpeakerState, StateCache,
+    discover_speakers_with_timeout, get_zone_groups_from_speaker,
+    streaming::{EventStream, ServiceType, StreamConfig},
+    Group, PlaybackState, SonosError, SpeakerState, StateCache,
 };
 use std::io::{self, Write};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -53,24 +55,73 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    println!("\nInitializing state monitor...\n");
+    println!("\nInitializing state monitor with real-time streaming...\n");
 
     // Initialize state cache
-    let state_cache = StateCache::new();
+    let state_cache = Arc::new(StateCache::new());
 
     // Initialize the cache with discovered speakers and real groups
-    state_cache.initialize(speakers, groups);
+    state_cache.initialize(speakers.clone(), groups);
 
     // Set some initial state for demonstration
     simulate_initial_state(&state_cache);
 
-    // Start the monitoring loop
-    monitor_state(&state_cache)?;
+    // Initialize streaming system
+    println!("Setting up real-time event streaming...");
+
+    // Create a configuration with only AVTransport (RenderingControl not implemented yet)
+    let stream_config =
+        StreamConfig::default().with_enabled_services(vec![ServiceType::AVTransport]);
+
+    // Validate configuration
+    if let Err(e) = stream_config.validate() {
+        println!("⚠️  Invalid streaming configuration: {}", e);
+        println!("   Using default configuration instead...");
+        let stream_config = StreamConfig::default();
+        if let Err(e) = stream_config.validate() {
+            println!("❌ Default configuration is also invalid: {}", e);
+            return Ok(());
+        }
+    }
+
+    println!("📋 Streaming configuration:");
+    println!("   - Buffer size: {}", stream_config.buffer_size);
+    println!(
+        "   - Subscription timeout: {:?}",
+        stream_config.subscription_timeout
+    );
+    println!("   - Retry attempts: {}", stream_config.retry_attempts);
+    println!(
+        "   - Enabled services: {:?}",
+        stream_config.enabled_services
+    );
+    println!(
+        "   - Callback port range: {:?}",
+        stream_config.callback_port_range
+    );
+
+    match EventStream::new(speakers, stream_config) {
+        Ok(event_stream) => {
+            println!("✅ Event streaming initialized successfully");
+            println!("🎵 Now monitoring real-time changes from your Sonos speakers!");
+            println!("   Try playing/pausing music on your speakers to see live updates.\n");
+
+            // Use manual event processing to see what's happening
+            monitor_state_with_manual_streaming(&state_cache, event_stream)?;
+        }
+        Err(e) => {
+            println!("⚠️  Failed to initialize streaming: {:?}", e);
+            println!("   Falling back to static state monitoring...\n");
+
+            // Fallback to original monitoring with simulated changes
+            monitor_state(&state_cache)?;
+        }
+    }
 
     Ok(())
 }
 
-fn simulate_initial_state(state_cache: &StateCache) {
+fn simulate_initial_state(state_cache: &Arc<StateCache>) {
     let speakers = state_cache.get_all_speakers();
 
     if !speakers.is_empty() {
@@ -95,7 +146,144 @@ fn simulate_initial_state(state_cache: &StateCache) {
     }
 }
 
-fn monitor_state(state_cache: &StateCache) -> Result<(), Box<dyn std::error::Error>> {
+fn monitor_state_with_manual_streaming(
+    state_cache: &Arc<StateCache>,
+    event_stream: EventStream,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut counter = 0;
+    let mut events_received = 0;
+    let mut last_event_time = std::time::Instant::now();
+    let start_time = std::time::Instant::now();
+
+    println!("⏳ Waiting for events from Sonos devices...");
+    println!("   This may take a few moments as subscriptions are established.");
+    println!("   Try playing/pausing music to trigger events.\n");
+
+    loop {
+        // Check for events with a short timeout
+        if let Some(event) = event_stream.recv_timeout(Duration::from_millis(100)) {
+            events_received += 1;
+            last_event_time = std::time::Instant::now();
+
+            println!("🎉 Received event #{}: {:?}", events_received, event);
+
+            // Update state cache
+            EventStream::process_state_change(state_cache, event);
+        }
+
+        // Update display every 2 seconds
+        if counter % 20 == 0 {
+            // 20 * 100ms = 2 seconds
+            // Clear screen and move cursor to top
+            print!("\x1B[2J\x1B[H");
+            io::stdout().flush()?;
+
+            // Display header
+            println!(
+                "🎵 Sonos State Monitor - LIVE STREAMING (Update #{}) 🎵",
+                counter / 20
+            );
+            println!("Press Ctrl+C to exit");
+            println!("Real-time updates from your Sonos speakers");
+            println!(
+                "Events received: {} (last: {:.1}s ago) | Running for: {:.1}s",
+                events_received,
+                last_event_time.elapsed().as_secs_f32(),
+                start_time.elapsed().as_secs_f32()
+            );
+            println!("═══════════════════════════════════════════════════════════════");
+
+            // Get current state
+            let groups = state_cache.get_all_groups();
+            let all_speakers = state_cache.get_all_speakers();
+
+            if groups.is_empty() {
+                println!("No groups found.");
+            } else {
+                display_groups_and_speakers(state_cache, &groups);
+            }
+
+            // Display ungrouped speakers
+            display_ungrouped_speakers(&all_speakers, &groups);
+
+            // Display summary
+            println!("\n📈 Summary:");
+            println!("├─ Total Speakers: {}", all_speakers.len());
+            println!("├─ Total Groups: {}", groups.len());
+            let playing_count = all_speakers
+                .iter()
+                .filter(|s| s.playback_state == PlaybackState::Playing)
+                .count();
+            println!("└─ Currently Playing: {}", playing_count);
+
+            // Show streaming status
+            println!("\n📡 Streaming Status:");
+            println!("├─ Stream Active: {}", event_stream.is_active());
+            println!("├─ Events Received: {}", events_received);
+            println!(
+                "└─ Last Event: {:.1}s ago",
+                last_event_time.elapsed().as_secs_f32()
+            );
+
+            println!("\n💡 Tip: Play/pause music on your Sonos speakers to see live updates!");
+        }
+
+        counter += 1;
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn monitor_state_with_streaming(
+    state_cache: &Arc<StateCache>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut counter = 0;
+
+    loop {
+        // Clear screen and move cursor to top
+        print!("\x1B[2J\x1B[H");
+        io::stdout().flush()?;
+
+        // Display header
+        println!(
+            "🎵 Sonos State Monitor - LIVE STREAMING (Update #{}) 🎵",
+            counter
+        );
+        println!("Press Ctrl+C to exit");
+        println!("Real-time updates from your Sonos speakers");
+        println!("═══════════════════════════════════════════════════════════════");
+
+        // Get current state
+        let groups = state_cache.get_all_groups();
+        let all_speakers = state_cache.get_all_speakers();
+
+        if groups.is_empty() {
+            println!("No groups found.");
+        } else {
+            display_groups_and_speakers(state_cache, &groups);
+        }
+
+        // Display ungrouped speakers
+        display_ungrouped_speakers(&all_speakers, &groups);
+
+        // Display summary
+        println!("\n📈 Summary:");
+        println!("├─ Total Speakers: {}", all_speakers.len());
+        println!("├─ Total Groups: {}", groups.len());
+        let playing_count = all_speakers
+            .iter()
+            .filter(|s| s.playback_state == PlaybackState::Playing)
+            .count();
+        println!("└─ Currently Playing: {}", playing_count);
+
+        // No simulated changes - all updates come from real streaming events!
+        println!("\n💡 Tip: Play/pause music on your Sonos speakers to see live updates!");
+
+        counter += 1;
+        thread::sleep(Duration::from_secs(2));
+    }
+}
+
+fn monitor_state(state_cache: &Arc<StateCache>) -> Result<(), Box<dyn std::error::Error>> {
     let mut counter = 0;
 
     loop {
@@ -139,7 +327,7 @@ fn monitor_state(state_cache: &StateCache) -> Result<(), Box<dyn std::error::Err
     }
 }
 
-fn display_groups_and_speakers(state_cache: &StateCache, groups: &[Group]) {
+fn display_groups_and_speakers(state_cache: &Arc<StateCache>, groups: &[Group]) {
     println!("📊 Groups and Speakers:");
 
     for (group_idx, group) in groups.iter().enumerate() {
@@ -236,7 +424,7 @@ fn create_volume_bar(volume: u8) -> String {
     format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
 }
 
-fn simulate_dynamic_changes(state_cache: &StateCache, counter: u32) {
+fn simulate_dynamic_changes(state_cache: &Arc<StateCache>, counter: u32) {
     let speakers = state_cache.get_all_speakers();
 
     // Simulate volume changes

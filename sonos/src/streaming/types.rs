@@ -112,6 +112,46 @@ impl StreamConfig {
         Self::default()
     }
 
+    /// Create a minimal configuration for testing or low-resource environments
+    pub fn minimal() -> Self {
+        Self {
+            buffer_size: 100,
+            subscription_timeout: Duration::from_secs(300), // 5 minutes
+            retry_attempts: 1,
+            retry_backoff: Duration::from_millis(500),
+            enabled_services: vec![ServiceType::AVTransport],
+            callback_port_range: (8080, 8085),
+        }
+    }
+
+    /// Create a comprehensive configuration with all services enabled
+    pub fn comprehensive() -> Self {
+        Self {
+            buffer_size: 5000,
+            subscription_timeout: Duration::from_secs(3600), // 1 hour
+            retry_attempts: 5,
+            retry_backoff: Duration::from_secs(2),
+            enabled_services: vec![
+                ServiceType::AVTransport,
+                ServiceType::RenderingControl,
+                ServiceType::ContentDirectory,
+            ],
+            callback_port_range: (8080, 8100),
+        }
+    }
+
+    /// Create a configuration optimized for production use
+    pub fn production() -> Self {
+        Self {
+            buffer_size: 2000,
+            subscription_timeout: Duration::from_secs(1800), // 30 minutes
+            retry_attempts: 3,
+            retry_backoff: Duration::from_secs(1),
+            enabled_services: vec![ServiceType::AVTransport, ServiceType::RenderingControl],
+            callback_port_range: (8080, 8090),
+        }
+    }
+
     /// Set the buffer size with validation
     pub fn with_buffer_size(mut self, size: usize) -> Result<Self, String> {
         if size == 0 {

@@ -61,9 +61,16 @@ impl AVTransportSubscription {
         let event_sub_url = ServiceType::AVTransport.event_sub_url();
         let full_url = format!("{}{}", device_url, event_sub_url);
 
-        // Create HTTP client for subscription requests (different from SOAP)
-        let client = reqwest::blocking::Client::new();
+        println!("📡 Sending SUBSCRIBE request to: {}", full_url);
+        println!("   Callback URL: {}", self.callback_url);
 
+        // Create HTTP client for subscription requests with timeout
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
+
+        println!("🔄 Making HTTP SUBSCRIBE request...");
         let response = client
             .request(
                 reqwest::Method::from_bytes(b"SUBSCRIBE").unwrap(),
@@ -77,14 +84,28 @@ impl AVTransportSubscription {
             .header("NT", "upnp:event")
             .header("TIMEOUT", format!("Second-{}", self.config.timeout_seconds))
             .send()
-            .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
+            .map_err(|e| {
+                println!("❌ HTTP request failed: {}", e);
+                SubscriptionError::NetworkError(e.to_string())
+            })?;
+
+        println!("📨 Received response: {}", response.status());
 
         if !response.status().is_success() {
-            return Err(SubscriptionError::SubscriptionFailed(format!(
-                "HTTP {} - {}",
-                response.status(),
-                response.status().canonical_reason().unwrap_or("Unknown")
-            )));
+            return match response.status().as_u16() {
+                503 => {
+                    println!("   Speaker appears to be a satellite/bonded speaker (503 Service Unavailable)");
+                    Err(SubscriptionError::SatelliteSpeaker)
+                },
+                _ => {
+                    let error_msg = format!(
+                        "HTTP {} - {}",
+                        response.status(),
+                        response.status().canonical_reason().unwrap_or("Unknown")
+                    );
+                    Err(SubscriptionError::SubscriptionFailed(error_msg))
+                }
+            };
         }
 
         // Extract SID from response headers
@@ -105,7 +126,10 @@ impl AVTransportSubscription {
         let event_sub_url = ServiceType::AVTransport.event_sub_url();
         let full_url = format!("{}{}", device_url, event_sub_url);
 
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
 
         let response = client
             .request(
@@ -136,7 +160,10 @@ impl AVTransportSubscription {
         let event_sub_url = ServiceType::AVTransport.event_sub_url();
         let full_url = format!("{}{}", device_url, event_sub_url);
 
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
 
         let response = client
             .request(
