@@ -3,6 +3,7 @@ pub mod subscription;
 pub mod event_stream;
 pub mod manager;
 pub mod callback_server;
+pub mod av_transport;
 
 // Re-export key types for easier access
 pub use types::{
@@ -12,3 +13,4 @@ pub use subscription::{ServiceSubscription, SubscriptionError};
 pub use event_stream::EventStream;
 pub use manager::SubscriptionManager;
 pub use callback_server::{CallbackServer, EventRouter, ServerStatus};
+pub use av_transport::AVTransportSubscription;

@@ -1,3 +1,5 @@
+use crate::streaming::ServiceType;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SpeakerId(u32);
 
@@ -118,6 +120,36 @@ pub enum StateChange {
     GroupTopologyChanged {
         groups: Vec<Group>,
     },
+    // New streaming-specific variants
+    TrackChanged {
+        speaker_id: SpeakerId,
+        track_info: Option<TrackInfo>,
+    },
+    TransportInfoChanged {
+        speaker_id: SpeakerId,
+        transport_state: PlaybackState,
+        transport_status: TransportStatus,
+    },
+    SubscriptionError {
+        speaker_id: SpeakerId,
+        service: ServiceType,
+        error: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct TrackInfo {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub uri: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportStatus {
+    Ok,
+    ErrorOccurred,
 }
 #[cfg(test)]
 mod tests {
