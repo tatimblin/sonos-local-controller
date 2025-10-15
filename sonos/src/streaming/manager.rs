@@ -155,24 +155,46 @@ impl SubscriptionManager {
         event_sender: &mpsc::Sender<StateChange>,
         raw_event: RawEvent,
     ) {
+        println!("🔄 Processing raw event in subscription manager...");
+        println!("   Subscription ID: {}", raw_event.subscription_id);
+        println!("   Event XML length: {} bytes", raw_event.event_xml.len());
+        
         let subscriptions_guard = match subscriptions.read() {
             Ok(guard) => guard,
             Err(_) => {
+                println!("❌ Failed to acquire read lock on subscriptions");
                 log::error!("Failed to acquire read lock on subscriptions");
                 return;
             }
         };
 
+        println!("📋 Current subscriptions in manager:");
+        for (id, subscription) in subscriptions_guard.iter() {
+            println!("   {} -> Speaker: {:?}, Service: {:?}, Active: {}", 
+                id, subscription.speaker_id(), subscription.service_type(), subscription.is_active());
+        }
+        if subscriptions_guard.is_empty() {
+            println!("   (No subscriptions in manager)");
+        }
+
         if let Some(subscription) = subscriptions_guard.get(&raw_event.subscription_id) {
+            println!("✅ Found subscription in manager, parsing event...");
+            
             match subscription.parse_event(&raw_event.event_xml) {
                 Ok(state_changes) => {
-                    for change in state_changes {
-                        if let Err(e) = event_sender.send(change) {
+                    println!("✅ Successfully parsed {} state changes", state_changes.len());
+                    for (i, change) in state_changes.iter().enumerate() {
+                        println!("   Change {}: {:?}", i + 1, change);
+                        if let Err(e) = event_sender.send(change.clone()) {
+                            println!("❌ Failed to send state change {}: {}", i + 1, e);
                             log::error!("Failed to send state change: {}", e);
+                        } else {
+                            println!("✅ Sent state change {} successfully", i + 1);
                         }
                     }
                 }
                 Err(e) => {
+                    println!("❌ Failed to parse event: {}", e);
                     log::warn!(
                         "Failed to parse event for subscription {}: {}",
                         raw_event.subscription_id,
@@ -187,16 +209,22 @@ impl SubscriptionManager {
                     };
 
                     if let Err(e) = event_sender.send(error_change) {
+                        println!("❌ Failed to send error state change: {}", e);
                         log::error!("Failed to send error state change: {}", e);
+                    } else {
+                        println!("✅ Sent error state change successfully");
                     }
                 }
             }
         } else {
+            println!("❌ No subscription found in manager for ID: {}", raw_event.subscription_id);
             log::warn!(
                 "Received event for unknown subscription: {}",
                 raw_event.subscription_id
             );
         }
+        
+        println!("🔄 Finished processing raw event\n");
     }
 
     /// Check subscriptions for renewal needs
@@ -457,21 +485,21 @@ impl SubscriptionManager {
         };
 
         // Establish the subscription with the device
-        let actual_subscription_id = subscription.subscribe()?;
+        let _actual_subscription_id = subscription.subscribe()?;
 
-        // Register with callback server
+        // Register with callback server using the original subscription ID (from callback URL)
         if let Some(callback_server) = self.callback_server.read().unwrap().as_ref() {
             let callback_path = format!("/callback/{}", subscription_id);
             callback_server.register_subscription(subscription_id, callback_path)?;
         }
 
-        // Store the subscription
+        // Store the subscription using the original subscription ID
         {
             let mut subscriptions = self.subscriptions.write().unwrap();
-            subscriptions.insert(actual_subscription_id, subscription);
+            subscriptions.insert(subscription_id, subscription);
         }
 
-        Ok(actual_subscription_id)
+        Ok(subscription_id)
     }
 
     /// Calculate exponential backoff duration
@@ -1098,6 +1126,7 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Test Model".to_string(),
+            satellites: vec![],
         }
     }
 

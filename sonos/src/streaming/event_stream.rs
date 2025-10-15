@@ -639,6 +639,7 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Test Model".to_string(),
+            satellites: vec![],
         }
     }
 

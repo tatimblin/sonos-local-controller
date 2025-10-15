@@ -96,7 +96,7 @@ impl AVTransportSubscription {
                 503 => {
                     println!("   Speaker appears to be a satellite/bonded speaker (503 Service Unavailable)");
                     Err(SubscriptionError::SatelliteSpeaker)
-                },
+                }
                 _ => {
                     let error_msg = format!(
                         "HTTP {} - {}",
@@ -191,16 +191,61 @@ impl AVTransportSubscription {
 
     /// Parse transport state from UPnP event XML
     fn parse_transport_state(&self, xml: &str) -> SubscriptionResult<Option<PlaybackState>> {
+        println!("🔍 Parsing transport state from XML...");
+        println!("   XML length: {} bytes", xml.len());
+        println!("   XML preview: {}", xml.chars().take(200).collect::<String>());
+        
         // Look for TransportState in the event XML
         if let Some(state_str) = self.extract_property_value(xml, "TransportState") {
+            println!("✅ Found TransportState: {}", state_str);
             match state_str.as_str() {
                 "PLAYING" => Ok(Some(PlaybackState::Playing)),
                 "PAUSED_PLAYBACK" => Ok(Some(PlaybackState::Paused)),
                 "STOPPED" => Ok(Some(PlaybackState::Stopped)),
                 "TRANSITIONING" => Ok(Some(PlaybackState::Transitioning)),
-                _ => Ok(None), // Unknown state, ignore
+                _ => {
+                    println!("⚠️  Unknown transport state: {}", state_str);
+                    Ok(None) // Unknown state, ignore
+                }
             }
         } else {
+            println!("❌ No TransportState found in XML");
+            
+            // Try to extract LastChange content for debugging
+            if let Some(last_change) = self.extract_property_value(xml, "LastChange") {
+                println!("🔍 Found LastChange content:");
+                println!("   {}", last_change.chars().take(300).collect::<String>());
+                
+                // Try to parse the escaped XML in LastChange
+                let decoded = self.decode_xml_entities(&last_change);
+                println!("🔍 Decoded LastChange:");
+                println!("   {}", decoded.chars().take(300).collect::<String>());
+                
+                // Look for TransportState in the decoded content
+                if decoded.contains("TransportState") {
+                    println!("✅ Found TransportState in decoded LastChange!");
+                    // Try to extract the val attribute
+                    if let Some(start) = decoded.find("TransportState val=\"") {
+                        let content_start = start + "TransportState val=\"".len();
+                        if let Some(end) = decoded[content_start..].find("\"") {
+                            let state_value = &decoded[content_start..content_start + end];
+                            println!("✅ Extracted TransportState value: {}", state_value);
+                            
+                            match state_value {
+                                "PLAYING" => return Ok(Some(PlaybackState::Playing)),
+                                "PAUSED_PLAYBACK" => return Ok(Some(PlaybackState::Paused)),
+                                "STOPPED" => return Ok(Some(PlaybackState::Stopped)),
+                                "TRANSITIONING" => return Ok(Some(PlaybackState::Transitioning)),
+                                _ => {
+                                    println!("⚠️  Unknown transport state in LastChange: {}", state_value);
+                                    return Ok(None);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
             Ok(None) // No transport state in this event
         }
     }
@@ -246,34 +291,40 @@ impl AVTransportSubscription {
     /// Extract a property value from UPnP event XML
     fn extract_property_value(&self, xml: &str, property_name: &str) -> Option<String> {
         // UPnP events use a specific XML structure with <property> elements
-        let property_start = format!("<property>");
-        let property_end = format!("</property>");
+        // Handle both namespaced and non-namespaced property elements
+        let property_patterns = [
+            ("<property>", "</property>"),
+            ("<e:property>", "</e:property>"),
+        ];
+        
         let var_start = format!("<{}>", property_name);
         let var_end = format!("</{}>", property_name);
 
-        // Find all property blocks and look for our variable
-        let mut search_pos = 0;
-        while let Some(prop_start) = xml[search_pos..].find(&property_start) {
-            let prop_start_abs = search_pos + prop_start;
-            if let Some(prop_end) = xml[prop_start_abs..].find(&property_end) {
-                let prop_end_abs = prop_start_abs + prop_end + property_end.len();
-                let property_xml = &xml[prop_start_abs..prop_end_abs];
+        // Try each property pattern
+        for (property_start, property_end) in &property_patterns {
+            let mut search_pos = 0;
+            while let Some(prop_start) = xml[search_pos..].find(property_start) {
+                let prop_start_abs = search_pos + prop_start;
+                if let Some(prop_end) = xml[prop_start_abs..].find(property_end) {
+                    let prop_end_abs = prop_start_abs + prop_end + property_end.len();
+                    let property_xml = &xml[prop_start_abs..prop_end_abs];
 
-                // Look for our variable within this property block
-                if let Some(var_start_pos) = property_xml.find(&var_start) {
-                    if let Some(var_end_pos) = property_xml[var_start_pos..].find(&var_end) {
-                        let content_start = var_start_pos + var_start.len();
-                        let content_end = var_start_pos + var_end_pos;
-                        let content = &property_xml[content_start..content_end];
+                    // Look for our variable within this property block
+                    if let Some(var_start_pos) = property_xml.find(&var_start) {
+                        if let Some(var_end_pos) = property_xml[var_start_pos..].find(&var_end) {
+                            let content_start = var_start_pos + var_start.len();
+                            let content_end = var_start_pos + var_end_pos;
+                            let content = &property_xml[content_start..content_end];
 
-                        // Decode XML entities
-                        return Some(self.decode_xml_entities(content));
+                            // Decode XML entities
+                            return Some(self.decode_xml_entities(content));
+                        }
                     }
-                }
 
-                search_pos = prop_end_abs;
-            } else {
-                break;
+                    search_pos = prop_end_abs;
+                } else {
+                    break;
+                }
             }
         }
 
@@ -440,6 +491,7 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Test Model".to_string(),
+            satellites: vec![],
         }
     }
 

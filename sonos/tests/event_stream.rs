@@ -14,6 +14,7 @@ fn create_test_speaker(udn: &str, name: &str, ip: &str) -> Speaker {
         ip_address: ip.to_string(),
         port: 1400,
         model_name: "PLAY:1".to_string(),
+        satellites: vec![],
     }
 }
 

@@ -77,11 +77,22 @@ impl CallbackServer {
                 let notify_route = warp::path::full()
                     .and(warp::header::headers_cloned())
                     .and(warp::body::bytes())
-                    .and(with_router)
+                    .and(with_router.clone())
                     .and_then(handle_notify_request);
 
+                // Create a catch-all route for logging all requests
+                let catch_all = warp::path::full()
+                    .and(warp::method())
+                    .and(warp::header::headers_cloned())
+                    .and(warp::body::bytes())
+                    .and(with_router)
+                    .and_then(handle_any_request);
+
+                // Combine routes - try notify route first, then catch-all
+                let routes = notify_route.or(catch_all);
+
                 // Create the server - bind to all interfaces so Sonos devices can reach it
-                let (_addr, server) = warp::serve(notify_route)
+                let (_addr, server) = warp::serve(routes)
                     .bind_with_graceful_shutdown(
                         SocketAddr::from(([0, 0, 0, 0], port)),
                         async move {
@@ -152,18 +163,37 @@ impl CallbackServer {
 
     /// Get the local IP address of this machine
     fn get_local_ip() -> Option<String> {
-        use std::net::TcpStream;
+        use std::net::{TcpStream, UdpSocket};
+        use std::time::Duration;
         
-        // Try to connect to a well-known address to determine our local IP
-        // We use Google's DNS server as a target, but we don't actually send data
-        if let Ok(stream) = TcpStream::connect("8.8.8.8:80") {
+        // First try: Use UDP socket to connect to a local address (doesn't actually send data)
+        // This is faster and doesn't require internet connectivity
+        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+            // Try to connect to the router's typical address to determine our local IP
+            for router_ip in &["192.168.1.1:80", "192.168.0.1:80", "10.0.0.1:80"] {
+                if let Ok(()) = socket.connect(router_ip) {
+                    if let Ok(local_addr) = socket.local_addr() {
+                        let ip_str = local_addr.ip().to_string();
+                        // Make sure it's not a loopback address
+                        if !ip_str.starts_with("127.") {
+                            return Some(ip_str);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Second try: Use TCP with a short timeout to external address
+        if let Ok(stream) = TcpStream::connect_timeout(
+            &"8.8.8.8:80".parse().unwrap(), 
+            Duration::from_millis(1000)
+        ) {
             if let Ok(local_addr) = stream.local_addr() {
                 return Some(local_addr.ip().to_string());
             }
         }
         
-        // Fallback: try to find a non-loopback interface
-        // This is a simplified approach - in production you might want to use a crate like `local-ip-address`
+        // Fallback: Use localhost (this may not work with Sonos devices)
         None
     }
 
@@ -246,6 +276,49 @@ async fn handle_notify_request(
     event_router.handle_notify_request(path, headers, body).await
 }
 
+/// Handler function for all other requests (for debugging)
+async fn handle_any_request(
+    path: warp::path::FullPath,
+    method: warp::http::Method,
+    headers: warp::http::HeaderMap,
+    body: bytes::Bytes,
+    _event_router: Arc<EventRouter>,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    println!("\n🌐 === ANY HTTP REQUEST ===");
+    println!("📡 Method: {}", method);
+    println!("📡 Path: {}", path.as_str());
+    println!("📏 Body size: {} bytes", body.len());
+    
+    println!("📋 Headers:");
+    for (name, value) in headers.iter() {
+        println!("   {}: {:?}", name, value);
+    }
+    
+    if body.len() > 0 {
+        match String::from_utf8(body.to_vec()) {
+            Ok(body_str) => {
+                println!("📄 Body content:");
+                println!("   {}", body_str.chars().take(300).collect::<String>());
+                if body_str.len() > 300 {
+                    println!("   ... (truncated, total {} chars)", body_str.len());
+                }
+            }
+            Err(_) => {
+                println!("📄 Body: [Invalid UTF-8, {} bytes]", body.len());
+            }
+        }
+    } else {
+        println!("📄 Body: [Empty]");
+    }
+    println!("🌐 === END ANY REQUEST ===\n");
+
+    // Return a simple response
+    Ok(warp::reply::with_status(
+        format!("Received {} request to {}", method, path.as_str()),
+        warp::http::StatusCode::OK,
+    ))
+}
+
 /// Routes UPnP events to the appropriate subscription handlers
 pub struct EventRouter {
     /// Maps callback paths to subscription IDs
@@ -280,9 +353,12 @@ impl EventRouter {
         subscription_id: SubscriptionId,
         callback_path: String,
     ) -> Result<(), SubscriptionError> {
+        println!("📝 Registering subscription: {} -> {}", callback_path, subscription_id);
+        
         // Use a blocking approach with std::sync primitives for non-async contexts
         // For now, we'll use a simple approach that works in both contexts
         let subscriptions = Arc::clone(&self.subscriptions);
+        let path_clone = callback_path.clone();
         
         // Try to get current runtime handle, if available use it, otherwise spawn a thread
         match tokio::runtime::Handle::try_current() {
@@ -309,6 +385,7 @@ impl EventRouter {
             }
         }
         
+        println!("✅ Successfully registered subscription: {}", path_clone);
         Ok(())
     }
 
@@ -362,6 +439,34 @@ impl EventRouter {
         headers: warp::http::HeaderMap,
         body: bytes::Bytes,
     ) -> Result<impl warp::Reply, warp::Rejection> {
+        // LOG: Incoming HTTP request details
+        println!("\n🌐 === INCOMING HTTP REQUEST ===");
+        println!("📡 Path: {}", path.as_str());
+        println!("📏 Body size: {} bytes", body.len());
+        
+        println!("📋 Headers:");
+        for (name, value) in headers.iter() {
+            println!("   {}: {:?}", name, value);
+        }
+        
+        if body.len() > 0 {
+            match String::from_utf8(body.to_vec()) {
+                Ok(body_str) => {
+                    println!("📄 Body content:");
+                    println!("   {}", body_str.chars().take(500).collect::<String>());
+                    if body_str.len() > 500 {
+                        println!("   ... (truncated, total {} chars)", body_str.len());
+                    }
+                }
+                Err(_) => {
+                    println!("📄 Body: [Invalid UTF-8, {} bytes]", body.len());
+                }
+            }
+        } else {
+            println!("📄 Body: [Empty]");
+        }
+        println!("🌐 === END HTTP REQUEST ===\n");
+
         // Extract the callback path
         let callback_path = path.as_str().to_string();
 
@@ -372,8 +477,23 @@ impl EventRouter {
         };
 
         let subscription_id = match subscription_id {
-            Some(id) => id,
+            Some(id) => {
+                println!("✅ Found subscription ID: {} for path: {}", id, callback_path);
+                id
+            }
             None => {
+                println!("❌ No subscription found for path: {}", callback_path);
+                
+                // Show all registered paths for debugging
+                let subscriptions = self.subscriptions.read().await;
+                println!("📋 Currently registered paths:");
+                for (path, id) in subscriptions.iter() {
+                    println!("   {} -> {}", path, id);
+                }
+                if subscriptions.is_empty() {
+                    println!("   (No subscriptions registered)");
+                }
+                
                 log::warn!("Received event for unknown callback path: {}", callback_path);
                 return Ok(warp::reply::with_status(
                     "Unknown subscription",
@@ -406,7 +526,12 @@ impl EventRouter {
         // Create and send the raw event
         let raw_event = RawEvent::new(subscription_id, event_xml);
         
+        println!("📤 Sending raw event to subscription manager...");
+        println!("   Subscription ID: {}", subscription_id);
+        println!("   Event XML length: {} bytes", raw_event.event_xml.len());
+        
         if let Err(_) = self.event_sender.send(raw_event) {
+            println!("❌ Failed to send raw event to subscription manager!");
             log::error!("Failed to send event for subscription {}", subscription_id);
             return Ok(warp::reply::with_status(
                 "Internal server error",
@@ -414,6 +539,7 @@ impl EventRouter {
             ));
         }
 
+        println!("✅ Raw event sent to subscription manager successfully");
         log::debug!("Successfully processed event for subscription {}", subscription_id);
         
         // Return success response
