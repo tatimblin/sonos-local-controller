@@ -122,10 +122,18 @@ impl StateCache {
             }
 
             for group in group_cache.values() {
-                for &member_id in &group.members {
-                    if let Some(speaker_state) = speakers.get_mut(&member_id) {
+                for member in &group.members {
+                    if let Some(speaker_state) = speakers.get_mut(&member.speaker_id) {
                         speaker_state.group_id = Some(group.id);
-                        speaker_state.is_coordinator = member_id == group.coordinator;
+                        speaker_state.is_coordinator = member.speaker_id == group.coordinator;
+                    }
+                    
+                    // Also update satellite states if they exist
+                    for &satellite_id in &member.satellites {
+                        if let Some(satellite_state) = speakers.get_mut(&satellite_id) {
+                            satellite_state.group_id = Some(group.id);
+                            satellite_state.is_coordinator = false; // Satellites are never coordinators
+                        }
                     }
                 }
             }
@@ -185,6 +193,7 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Sonos One".to_string(),
+            satellites: vec![],
         };
 
         let speaker2 = Speaker {
@@ -195,6 +204,7 @@ mod tests {
             ip_address: "192.168.1.101".to_string(),
             port: 1400,
             model_name: "Sonos Play:1".to_string(),
+            satellites: vec![],
         };
 
         cache.initialize(vec![speaker1.clone(), speaker2.clone()], vec![]);
@@ -221,6 +231,7 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Sonos One".to_string(),
+            satellites: vec![],
         };
 
         let speaker2 = Speaker {
@@ -231,6 +242,7 @@ mod tests {
             ip_address: "192.168.1.101".to_string(),
             port: 1400,
             model_name: "Sonos Play:1".to_string(),
+            satellites: vec![],
         };
 
         let speakers = vec![speaker1.clone(), speaker2.clone()];
@@ -363,6 +375,7 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Sonos One".to_string(),
+            satellites: vec![],
         };
 
         let speaker2 = Speaker {
@@ -373,6 +386,7 @@ mod tests {
             ip_address: "192.168.1.101".to_string(),
             port: 1400,
             model_name: "Sonos Play:1".to_string(),
+            satellites: vec![],
         };
 
         // Create a group with speaker1 as coordinator and speaker2 as member
@@ -413,6 +427,7 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Sonos One".to_string(),
+            satellites: vec![],
         };
 
         let speaker2 = Speaker {
@@ -423,6 +438,7 @@ mod tests {
             ip_address: "192.168.1.101".to_string(),
             port: 1400,
             model_name: "Sonos Play:1".to_string(),
+            satellites: vec![],
         };
 
         let mut group = Group::new(speaker1.id);
@@ -455,6 +471,7 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Sonos One".to_string(),
+            satellites: vec![],
         };
 
         let speaker2 = Speaker {
@@ -465,6 +482,7 @@ mod tests {
             ip_address: "192.168.1.101".to_string(),
             port: 1400,
             model_name: "Sonos Play:1".to_string(),
+            satellites: vec![],
         };
 
         let mut group = Group::new(speaker1.id);
@@ -491,6 +509,7 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Sonos One".to_string(),
+            satellites: vec![],
         };
 
         let speaker2 = Speaker {
@@ -501,6 +520,7 @@ mod tests {
             ip_address: "192.168.1.101".to_string(),
             port: 1400,
             model_name: "Sonos Play:1".to_string(),
+            satellites: vec![],
         };
 
         let group1 = Group::new(speaker1.id);
@@ -527,6 +547,7 @@ mod tests {
             ip_address: "192.168.1.100".to_string(),
             port: 1400,
             model_name: "Sonos One".to_string(),
+            satellites: vec![],
         };
 
         let speaker2 = Speaker {
@@ -537,6 +558,7 @@ mod tests {
             ip_address: "192.168.1.101".to_string(),
             port: 1400,
             model_name: "Sonos Play:1".to_string(),
+            satellites: vec![],
         };
 
         // Create a group with speaker1 as coordinator and speaker2 as member

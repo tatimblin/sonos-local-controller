@@ -377,7 +377,7 @@ fn display_groups_and_speakers(state_cache: &Arc<StateCache>, groups: &[Group]) 
 
 fn display_ungrouped_speakers(all_speakers: &[SpeakerState], groups: &[Group]) {
     let grouped_speaker_ids: std::collections::HashSet<_> =
-        groups.iter().flat_map(|g| &g.members).collect();
+        groups.iter().flat_map(|g| g.all_speaker_ids()).collect();
 
     let ungrouped: Vec<_> = all_speakers
         .iter()

@@ -50,7 +50,7 @@ fn test_get_zone_group_state_real_speakers() {
                 
                 // Validate group structure
                 assert!(!group.members.is_empty(), "Group should have at least one member (coordinator)");
-                assert!(group.members.contains(&group.coordinator), 
+                assert!(group.is_member(group.coordinator), 
                         "Group members should include the coordinator");
                 
                 // Validate that group ID is based on coordinator
@@ -62,7 +62,7 @@ fn test_get_zone_group_state_real_speakers() {
             // Note: Satellite speakers (like surround speakers) may not appear as regular members
             let current_speaker_id = sonos::models::SpeakerId::from_udn(&speaker.udn);
             let speaker_found = groups.iter().any(|group| 
-                group.members.contains(&current_speaker_id)
+                group.is_member(current_speaker_id) || group.all_speaker_ids().contains(&current_speaker_id)
             );
             
             if !speaker_found {
@@ -202,7 +202,7 @@ fn test_get_zone_group_state_response_format() {
         
         // Should have at least the coordinator as a member
         assert!(!group.members.is_empty(), "Group should have at least one member");
-        assert!(group.members.contains(&group.coordinator), 
+        assert!(group.is_member(group.coordinator), 
                 "Coordinator should be included in members list");
         
         // All member IDs should be valid (just check they exist)

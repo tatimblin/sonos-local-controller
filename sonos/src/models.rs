@@ -42,6 +42,7 @@ pub struct Speaker {
     pub ip_address: String,
     pub port: u16,
     pub model_name: String,
+    pub satellites: Vec<SpeakerId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,11 +65,17 @@ pub struct SpeakerState {
     pub group_id: Option<GroupId>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SpeakerWithSatellites {
+    pub speaker_id: SpeakerId,
+    pub satellites: Vec<SpeakerId>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Group {
     pub id: GroupId,
     pub coordinator: SpeakerId,
-    pub members: Vec<SpeakerId>,
+    pub members: Vec<SpeakerWithSatellites>,
 }
 
 impl Group {
@@ -76,26 +83,53 @@ impl Group {
         Self {
             id: GroupId::from_coordinator(coordinator),
             coordinator,
-            members: vec![coordinator],
+            members: vec![SpeakerWithSatellites {
+                speaker_id: coordinator,
+                satellites: vec![],
+            }],
         }
     }
 
     pub fn add_member(&mut self, speaker_id: SpeakerId) {
-        if !self.members.contains(&speaker_id) {
-            self.members.push(speaker_id);
+        if !self.is_member(speaker_id) {
+            self.members.push(SpeakerWithSatellites {
+                speaker_id,
+                satellites: vec![],
+            });
+        }
+    }
+
+    pub fn add_member_with_satellites(&mut self, speaker_id: SpeakerId, satellites: Vec<SpeakerId>) {
+        if let Some(existing) = self.members.iter_mut().find(|m| m.speaker_id == speaker_id) {
+            existing.satellites = satellites;
+        } else {
+            self.members.push(SpeakerWithSatellites {
+                speaker_id,
+                satellites,
+            });
         }
     }
 
     pub fn remove_member(&mut self, speaker_id: SpeakerId) {
-        self.members.retain(|&id| id != speaker_id);
+        self.members.retain(|member| member.speaker_id != speaker_id);
     }
 
     pub fn is_member(&self, speaker_id: SpeakerId) -> bool {
-        self.members.contains(&speaker_id)
+        self.members.iter().any(|member| member.speaker_id == speaker_id)
     }
 
     pub fn member_count(&self) -> usize {
         self.members.len()
+    }
+
+    /// Get all speaker IDs including satellites
+    pub fn all_speaker_ids(&self) -> Vec<SpeakerId> {
+        let mut all_ids = Vec::new();
+        for member in &self.members {
+            all_ids.push(member.speaker_id);
+            all_ids.extend(&member.satellites);
+        }
+        all_ids
     }
 }
 
@@ -201,7 +235,12 @@ mod tests {
         assert_eq!(group.id, GroupId::from_coordinator(coordinator_id));
         assert_eq!(group.coordinator, coordinator_id);
         assert_eq!(group.members.len(), 1);
-        assert!(group.members.contains(&coordinator_id));
+        assert!(group.is_member(coordinator_id));
+        
+        // Coordinator should have no satellites initially
+        let coordinator_member = &group.members[0];
+        assert_eq!(coordinator_member.speaker_id, coordinator_id);
+        assert_eq!(coordinator_member.satellites.len(), 0);
     }
 
     #[test]
@@ -219,6 +258,31 @@ mod tests {
         // Adding the same member again should not duplicate
         group.add_member(member_id);
         assert_eq!(group.members.len(), 2);
+    }
+
+    #[test]
+    fn test_group_add_member_with_satellites() {
+        let coordinator_id = SpeakerId::from_udn("uuid:RINCON_123456789::1");
+        let satellite1_id = SpeakerId::from_udn("uuid:RINCON_SAT001::1");
+        let satellite2_id = SpeakerId::from_udn("uuid:RINCON_SAT002::1");
+        let mut group = Group::new(coordinator_id);
+
+        group.add_member_with_satellites(coordinator_id, vec![satellite1_id, satellite2_id]);
+
+        assert_eq!(group.members.len(), 1);
+        assert!(group.is_member(coordinator_id));
+        
+        let coordinator_member = &group.members[0];
+        assert_eq!(coordinator_member.satellites.len(), 2);
+        assert!(coordinator_member.satellites.contains(&satellite1_id));
+        assert!(coordinator_member.satellites.contains(&satellite2_id));
+        
+        // Check all_speaker_ids includes satellites
+        let all_ids = group.all_speaker_ids();
+        assert_eq!(all_ids.len(), 3);
+        assert!(all_ids.contains(&coordinator_id));
+        assert!(all_ids.contains(&satellite1_id));
+        assert!(all_ids.contains(&satellite2_id));
     }
 
     #[test]

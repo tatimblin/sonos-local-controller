@@ -62,21 +62,68 @@ impl ZoneGroupsService {
             })?;
 
         let coordinator_id = SpeakerId::from_udn(&Self::uuid_to_udn(&coordinator_udn));
-
-        let mut members = vec![coordinator_id];
+        let mut group = Group::new(coordinator_id);
 
         let mut start = 0;
         while let Some(member_start) = zone_xml[start..].find("<ZoneGroupMember") {
             let absolute_start = start + member_start;
-            if let Some(member_end) = zone_xml[absolute_start..].find("/>") {
-                let absolute_end = absolute_start + member_end + "/>".len();
-                let member_xml = &zone_xml[absolute_start..absolute_end];
+            
+            // Find the end of this ZoneGroupMember (could be self-closing or have content)
+            let member_end_pos = if zone_xml[absolute_start..].contains("/>") && 
+                                   zone_xml[absolute_start..].find("/>").unwrap() < zone_xml[absolute_start..].find(">").unwrap_or(usize::MAX) {
+                // Self-closing tag
+                let self_close = zone_xml[absolute_start..].find("/>").unwrap();
+                absolute_start + self_close + "/>".len()
+            } else if let Some(close_start) = zone_xml[absolute_start..].find(">") {
+                // Has content, find the closing tag
+                if let Some(close_tag_start) = zone_xml[absolute_start..].find("</ZoneGroupMember>") {
+                    absolute_start + close_tag_start + "</ZoneGroupMember>".len()
+                } else {
+                    // Malformed, skip
+                    absolute_start + close_start + ">".len()
+                }
+            } else {
+                break;
+            };
 
-                if let Some(uuid) = Self::extract_attribute(member_xml, "UUID") {
-                    let member_id = SpeakerId::from_udn(&Self::uuid_to_udn(&uuid));
-                    if member_id != coordinator_id {
-                        members.push(member_id);
+            let member_xml = &zone_xml[absolute_start..member_end_pos];
+
+            if let Some(uuid) = Self::extract_attribute(member_xml, "UUID") {
+                let member_id = SpeakerId::from_udn(&Self::uuid_to_udn(&uuid));
+                
+                // Parse satellites for this member
+                let satellites = Self::parse_satellites(member_xml);
+                
+                if member_id == coordinator_id {
+                    // Update coordinator with satellites
+                    if let Some(coordinator_member) = group.members.iter_mut().find(|m| m.speaker_id == coordinator_id) {
+                        coordinator_member.satellites = satellites;
                     }
+                } else {
+                    // Add as regular member with satellites
+                    group.add_member_with_satellites(member_id, satellites);
+                }
+            }
+
+            start = member_end_pos;
+        }
+
+        Ok(group)
+    }
+
+    fn parse_satellites(member_xml: &str) -> Vec<SpeakerId> {
+        let mut satellites = Vec::new();
+        let mut start = 0;
+        
+        while let Some(satellite_start) = member_xml[start..].find("<Satellite") {
+            let absolute_start = start + satellite_start;
+            if let Some(satellite_end) = member_xml[absolute_start..].find("/>") {
+                let absolute_end = absolute_start + satellite_end + "/>".len();
+                let satellite_xml = &member_xml[absolute_start..absolute_end];
+
+                if let Some(uuid) = Self::extract_attribute(satellite_xml, "UUID") {
+                    let satellite_id = SpeakerId::from_udn(&Self::uuid_to_udn(&uuid));
+                    satellites.push(satellite_id);
                 }
 
                 start = absolute_end;
@@ -84,12 +131,8 @@ impl ZoneGroupsService {
                 break;
             }
         }
-
-        Ok(Group {
-            id: GroupId::from_coordinator(coordinator_id),
-            coordinator: coordinator_id,
-            members,
-        })
+        
+        satellites
     }
 
     fn extract_attribute(xml: &str, attr_name: &str) -> Option<String> {
@@ -228,7 +271,11 @@ mod tests {
         assert_eq!(group.coordinator, expected_coordinator);
         assert_eq!(group.id, GroupId::from_coordinator(expected_coordinator));
         assert_eq!(group.members.len(), 1);
-        assert!(group.members.contains(&expected_coordinator));
+        assert!(group.is_member(expected_coordinator));
+        
+        // Should have no satellites
+        let coordinator_member = group.members.iter().find(|m| m.speaker_id == expected_coordinator).unwrap();
+        assert_eq!(coordinator_member.satellites.len(), 0);
     }
 
     #[test]
@@ -240,12 +287,28 @@ mod tests {
 
         let group = result.unwrap();
         let expected_coordinator = SpeakerId::from_udn("uuid:RINCON_5CAAFDAE58BD01400::1");
+        let expected_satellite1 = SpeakerId::from_udn("uuid:RINCON_7828CA128F0001400::1");
+        let expected_satellite2 = SpeakerId::from_udn("uuid:RINCON_7828CAFB9D9C01400::1");
 
         assert_eq!(group.coordinator, expected_coordinator);
         assert_eq!(group.id, GroupId::from_coordinator(expected_coordinator));
-        // Should only have the coordinator as member (satellites are not parsed as members in current implementation)
+        
+        // Should have the coordinator as member with satellites nested under it
         assert_eq!(group.members.len(), 1);
-        assert!(group.members.contains(&expected_coordinator));
+        assert!(group.is_member(expected_coordinator));
+        
+        // Check that satellites are properly nested under the coordinator
+        let coordinator_member = group.members.iter().find(|m| m.speaker_id == expected_coordinator).unwrap();
+        assert_eq!(coordinator_member.satellites.len(), 2);
+        assert!(coordinator_member.satellites.contains(&expected_satellite1));
+        assert!(coordinator_member.satellites.contains(&expected_satellite2));
+        
+        // Check that all_speaker_ids includes satellites
+        let all_ids = group.all_speaker_ids();
+        assert_eq!(all_ids.len(), 3);
+        assert!(all_ids.contains(&expected_coordinator));
+        assert!(all_ids.contains(&expected_satellite1));
+        assert!(all_ids.contains(&expected_satellite2));
     }
 
     #[test]
@@ -288,7 +351,11 @@ mod tests {
             .find(|g| g.coordinator == basement_coordinator);
         assert!(basement_group.is_some());
         let basement_group = basement_group.unwrap();
-        assert_eq!(basement_group.members.len(), 1); // Only coordinator, satellites not counted as members
+        assert_eq!(basement_group.members.len(), 1); // Only coordinator as member
+        
+        // But satellites should be nested under the coordinator
+        let coordinator_member = basement_group.members.iter().find(|m| m.speaker_id == basement_coordinator).unwrap();
+        assert_eq!(coordinator_member.satellites.len(), 2); // Should have 2 satellites
     }
 
     #[test]
@@ -331,8 +398,15 @@ mod tests {
 
         assert_eq!(group.coordinator, coordinator_id);
         assert_eq!(group.members.len(), 3);
-        assert!(group.members.contains(&coordinator_id));
-        assert!(group.members.contains(&member1_id));
-        assert!(group.members.contains(&member2_id));
+        assert!(group.is_member(coordinator_id));
+        assert!(group.is_member(member1_id));
+        assert!(group.is_member(member2_id));
+        
+        // Check that all_speaker_ids works correctly
+        let all_ids = group.all_speaker_ids();
+        assert_eq!(all_ids.len(), 3);
+        assert!(all_ids.contains(&coordinator_id));
+        assert!(all_ids.contains(&member1_id));
+        assert!(all_ids.contains(&member2_id));
     }
 }
