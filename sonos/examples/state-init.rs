@@ -3,7 +3,6 @@ use sonos::{
     SpeakerState, StateCache,
 };
 use std::io::{self, Write};
-use std::thread;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -53,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    println!("\nInitializing state monitor...\n");
+    println!("\nInitializing state cache...\n");
 
     // Initialize state cache
     let state_cache = StateCache::new();
@@ -61,82 +60,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the cache with discovered speakers and real groups
     state_cache.initialize(speakers, groups);
 
-    // Set some initial state for demonstration
-    simulate_initial_state(&state_cache);
-
-    // Start the monitoring loop
-    monitor_state(&state_cache)?;
+    // Display the initial state
+    display_initial_state(&state_cache)?;
 
     Ok(())
 }
 
-fn simulate_initial_state(state_cache: &StateCache) {
-    let speakers = state_cache.get_all_speakers();
+fn display_initial_state(state_cache: &StateCache) -> Result<(), Box<dyn std::error::Error>> {
+    // Clear screen and display header
+    print!("\x1B[2J\x1B[H");
+    io::stdout().flush()?;
 
-    if !speakers.is_empty() {
-        // Set some initial realistic states
-        for (i, speaker_state) in speakers.iter().enumerate() {
-            let playback_state = match i % 4 {
-                0 => PlaybackState::Playing,
-                1 => PlaybackState::Paused,
-                2 => PlaybackState::Stopped,
-                _ => PlaybackState::Transitioning,
-            };
+    println!("🎵 Sonos Initial State 🎵");
+    println!("═══════════════════════════════════════════════════════════════");
 
-            state_cache.update_playback_state(speaker_state.speaker.id, playback_state);
-            let volume = (25 + i * 15).min(85) as u8;
-            state_cache.update_volume(speaker_state.speaker.id, volume);
+    // Get current state
+    let groups = state_cache.get_all_groups();
+    let all_speakers = state_cache.get_all_speakers();
 
-            // Occasionally mute a speaker
-            if i % 3 == 0 {
-                state_cache.update_mute(speaker_state.speaker.id, true);
-            }
-        }
+    if groups.is_empty() {
+        println!("No groups found.");
+    } else {
+        display_groups_and_speakers(state_cache, &groups);
     }
-}
 
-fn monitor_state(state_cache: &StateCache) -> Result<(), Box<dyn std::error::Error>> {
-    let mut counter = 0;
+    // Display ungrouped speakers
+    display_ungrouped_speakers(&all_speakers, &groups);
 
-    loop {
-        // Clear screen and move cursor to top
-        print!("\x1B[2J\x1B[H");
-        io::stdout().flush()?;
+    // Display summary
+    println!("\n📈 Summary:");
+    println!("├─ Total Speakers: {}", all_speakers.len());
+    println!("├─ Total Groups: {}", groups.len());
+    let playing_count = all_speakers
+        .iter()
+        .filter(|s| s.playback_state == PlaybackState::Playing)
+        .count();
+    println!("└─ Currently Playing: {}", playing_count);
 
-        // Display header
-        println!("🎵 Sonos State Monitor (Update #{}) 🎵", counter);
-        println!("Press Ctrl+C to exit");
-        println!("═══════════════════════════════════════════════════════════════");
-
-        // Get current state
-        let groups = state_cache.get_all_groups();
-        let all_speakers = state_cache.get_all_speakers();
-
-        if groups.is_empty() {
-            println!("No groups found.");
-        } else {
-            display_groups_and_speakers(state_cache, &groups);
-        }
-
-        // Display ungrouped speakers
-        display_ungrouped_speakers(&all_speakers, &groups);
-
-        // Display summary
-        println!("\n📈 Summary:");
-        println!("├─ Total Speakers: {}", all_speakers.len());
-        println!("├─ Total Groups: {}", groups.len());
-        let playing_count = all_speakers
-            .iter()
-            .filter(|s| s.playback_state == PlaybackState::Playing)
-            .count();
-        println!("└─ Currently Playing: {}", playing_count);
-
-        // Simulate some dynamic changes
-        simulate_dynamic_changes(state_cache, counter);
-
-        counter += 1;
-        thread::sleep(Duration::from_secs(2));
-    }
+    println!("\nInitial state displayed successfully!");
+    Ok(())
 }
 
 fn display_groups_and_speakers(state_cache: &StateCache, groups: &[Group]) {
@@ -234,28 +196,4 @@ fn create_volume_bar(volume: u8) -> String {
     let empty = bar_length - filled;
 
     format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
-}
-
-fn simulate_dynamic_changes(state_cache: &StateCache, counter: u32) {
-    let speakers = state_cache.get_all_speakers();
-
-    // Simulate volume changes
-    for (i, speaker_state) in speakers.iter().enumerate() {
-        let base_volume = 30 + (i * 15).min(40); // Ensure we don't overflow
-        let volume_variation = ((counter as f32 * 0.5 + i as f32).sin() * 10.0) as i32;
-        let new_volume = (base_volume as i32 + volume_variation).max(0).min(100) as u8;
-
-        state_cache.update_volume(speaker_state.speaker.id, new_volume);
-
-        // Occasionally change playback state
-        if counter % 10 == i as u32 {
-            let new_state = match speaker_state.playback_state {
-                PlaybackState::Playing => PlaybackState::Paused,
-                PlaybackState::Paused => PlaybackState::Playing,
-                PlaybackState::Stopped => PlaybackState::Playing,
-                PlaybackState::Transitioning => PlaybackState::Playing,
-            };
-            state_cache.update_playback_state(speaker_state.speaker.id, new_state);
-        }
-    }
 }

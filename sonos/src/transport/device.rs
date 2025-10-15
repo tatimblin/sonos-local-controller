@@ -51,6 +51,7 @@ impl Device {
       ip_address,
       port: 1400,
       model_name: self.model_name.clone(),
+      satellites: vec![],
     }
   }
 

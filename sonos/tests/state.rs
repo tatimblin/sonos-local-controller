@@ -104,13 +104,21 @@ fn test_initialize_state_with_real_speakers_and_groups() {
         assert_eq!(cached_group.members.len(), original_group.members.len());
 
         // Verify group members have correct state
-        for &member_id in &cached_group.members {
-            if let Some(member_state) = cache.get_speaker(member_id) {
+        for member in &cached_group.members {
+            if let Some(member_state) = cache.get_speaker(member.speaker_id) {
                 assert_eq!(member_state.group_id, Some(original_group.id));
                 assert_eq!(
                     member_state.is_coordinator,
-                    member_id == original_group.coordinator
+                    member.speaker_id == original_group.coordinator
                 );
+            }
+            
+            // Also check satellites
+            for &satellite_id in &member.satellites {
+                if let Some(satellite_state) = cache.get_speaker(satellite_id) {
+                    assert_eq!(satellite_state.group_id, Some(original_group.id));
+                    assert_eq!(satellite_state.is_coordinator, false);
+                }
             }
         }
     }
@@ -118,8 +126,12 @@ fn test_initialize_state_with_real_speakers_and_groups() {
     // Validate that all discovered speakers are accounted for in groups
     let mut speakers_in_groups = HashSet::new();
     for group in &groups {
-        for &member_id in &group.members {
-            speakers_in_groups.insert(member_id);
+        for member in &group.members {
+            speakers_in_groups.insert(member.speaker_id);
+            // Also include satellites
+            for &satellite_id in &member.satellites {
+                speakers_in_groups.insert(satellite_id);
+            }
         }
     }
 
