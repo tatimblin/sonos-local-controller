@@ -1,29 +1,31 @@
-use std::time::SystemTime;
+use super::types::{ServiceType, SubscriptionConfig, SubscriptionId};
 use crate::models::{SpeakerId, StateChange};
-use super::types::{ServiceType, SubscriptionId, SubscriptionConfig};
+use std::time::SystemTime;
 
 /// Error types for subscription operations
 #[derive(Debug, thiserror::Error)]
 pub enum SubscriptionError {
     #[error("Failed to establish subscription: {0}")]
     SubscriptionFailed(String),
-    
+
     #[error("Subscription expired or was rejected by device")]
     SubscriptionExpired,
-    
+
     #[error("Failed to parse event notification: {0}")]
     EventParseError(String),
-    
+
     #[error("Callback server error: {0}")]
     CallbackServerError(String),
-    
+
     #[error("Network communication error: {0}")]
     NetworkError(String),
-    
+
     #[error("Service not supported by device: {service:?}")]
     ServiceNotSupported { service: ServiceType },
 
-    #[error("Speaker is likely a satellite/bonded speaker and cannot accept individual subscriptions")]
+    #[error(
+        "Speaker is likely a satellite/bonded speaker and cannot accept individual subscriptions"
+    )]
     SatelliteSpeaker,
 
     #[error("Invalid subscription configuration: {0}")]
@@ -62,7 +64,7 @@ impl From<quick_xml::Error> for SubscriptionError {
 pub type SubscriptionResult<T> = Result<T, SubscriptionError>;
 
 /// Abstract trait for service-specific UPnP subscriptions
-/// 
+///
 /// This trait defines the lifecycle and behavior of a UPnP service subscription.
 /// Implementations handle service-specific SOAP operations, event parsing, and
 /// subscription management for different UPnP services like AVTransport or RenderingControl.
@@ -74,47 +76,47 @@ pub trait ServiceSubscription: Send + Sync {
     fn speaker_id(&self) -> SpeakerId;
 
     /// Establish a new UPnP subscription with the device
-    /// 
+    ///
     /// This method sends a SUBSCRIBE request to the device's event subscription URL
     /// and returns the subscription ID if successful.
     fn subscribe(&mut self) -> SubscriptionResult<SubscriptionId>;
 
     /// Unsubscribe from the UPnP service
-    /// 
+    ///
     /// This method sends an UNSUBSCRIBE request to properly clean up the subscription
     /// on the device side.
     fn unsubscribe(&mut self) -> SubscriptionResult<()>;
 
     /// Renew an existing subscription before it expires
-    /// 
+    ///
     /// This method extends the subscription timeout by sending a renewal request
     /// to the device.
     fn renew(&mut self) -> SubscriptionResult<()>;
 
     /// Parse a UPnP event notification into StateChange events
-    /// 
+    ///
     /// This method takes the raw XML from a UPnP event notification and converts
     /// it into one or more StateChange events that can be consumed by the application.
     fn parse_event(&self, event_xml: &str) -> SubscriptionResult<Vec<StateChange>>;
 
     /// Check if the subscription is currently active
-    /// 
+    ///
     /// Returns true if the subscription has been established and has not expired
     /// or been unsubscribed.
     fn is_active(&self) -> bool;
 
     /// Get the timestamp of the last successful renewal
-    /// 
+    ///
     /// Returns None if the subscription has never been renewed or established.
     fn last_renewal(&self) -> Option<SystemTime>;
 
     /// Get the current subscription ID
-    /// 
+    ///
     /// Returns None if no subscription is currently active.
     fn subscription_id(&self) -> Option<SubscriptionId>;
 
     /// Check if the subscription needs renewal
-    /// 
+    ///
     /// Returns true if the subscription is active but approaching expiry
     /// based on the renewal threshold in the configuration.
     fn needs_renewal(&self) -> bool {
@@ -133,12 +135,12 @@ pub trait ServiceSubscription: Send + Sync {
     fn get_config(&self) -> &SubscriptionConfig;
 
     /// Get the callback URL for this subscription
-    /// 
+    ///
     /// This URL is where the device will send event notifications.
     fn callback_url(&self) -> &str;
 
     /// Handle subscription lifecycle events
-    /// 
+    ///
     /// This method is called when subscription state changes occur,
     /// allowing implementations to perform cleanup or state updates.
     fn on_subscription_state_changed(&mut self, active: bool) -> SubscriptionResult<()> {
@@ -290,12 +292,18 @@ mod tests {
         // Test different error types
         let parse_err = SubscriptionError::EventParseError("test error".to_string());
         assert!(matches!(parse_err, SubscriptionError::EventParseError(_)));
-        
+
         let expired_err = SubscriptionError::SubscriptionExpired;
-        assert!(matches!(expired_err, SubscriptionError::SubscriptionExpired));
-        
+        assert!(matches!(
+            expired_err,
+            SubscriptionError::SubscriptionExpired
+        ));
+
         let config_err = SubscriptionError::InvalidConfiguration("invalid".to_string());
-        assert!(matches!(config_err, SubscriptionError::InvalidConfiguration(_)));
+        assert!(matches!(
+            config_err,
+            SubscriptionError::InvalidConfiguration(_)
+        ));
     }
 
     #[test]
@@ -312,7 +320,7 @@ mod tests {
 
         // Subscribe and check renewal logic
         subscription.subscribe().unwrap();
-        
+
         // Should not need renewal immediately after subscribing
         assert!(!subscription.needs_renewal());
     }
