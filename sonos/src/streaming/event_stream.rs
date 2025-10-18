@@ -319,6 +319,84 @@ impl EventStream {
         })
     }
 
+    /// Start automatic state updates with event notifications
+    ///
+    /// This method creates a background thread that processes events, updates the StateCache,
+    /// and sends notifications through a channel whenever an event is processed. This allows
+    /// applications to react to state changes in real-time while maintaining automatic
+    /// state management.
+    ///
+    /// # Arguments
+    ///
+    /// * `state_cache` - The StateCache instance to update with received events
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple containing:
+    /// - JoinHandle for the background thread
+    /// - Receiver for event notifications (receives () for each processed event)
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use std::sync::Arc;
+    /// use std::time::Duration;
+    /// use sonos::streaming::{EventStream, StreamConfig};
+    /// use sonos::state::StateCache;
+    /// use sonos::models::Speaker;
+    ///
+    /// let speakers = vec![/* discovered speakers */];
+    /// let config = StreamConfig::default();
+    /// let event_stream = EventStream::new(speakers, config)?;
+    /// let state_cache = Arc::new(StateCache::new());
+    ///
+    /// // Start automatic state updates with notifications
+    /// let (update_handle, event_notifications) = event_stream.start_state_updates_with_notifications(state_cache.clone());
+    ///
+    /// // Listen for event notifications to update UI immediately
+    /// loop {
+    ///     match event_notifications.recv_timeout(Duration::from_secs(1)) {
+    ///         Ok(()) => {
+    ///             // Event processed, update display
+    ///             println!("State updated!");
+    ///         }
+    ///         Err(_) => {
+    ///             // Timeout or disconnected
+    ///             break;
+    ///         }
+    ///     }
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn start_state_updates_with_notifications(
+        self,
+        state_cache: Arc<StateCache>,
+    ) -> (JoinHandle<()>, mpsc::Receiver<()>) {
+        let shutdown_flag = self.shutdown_flag.clone();
+        let (notification_tx, notification_rx) = mpsc::channel();
+
+        let handle = thread::spawn(move || {
+            // Use the iterator to continuously process events
+            for event in self.iter() {
+                // Check for shutdown signal
+                if shutdown_flag.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                // Process the event and update state
+                Self::process_state_change_internal(&state_cache, event);
+
+                // Send notification that an event was processed
+                if notification_tx.send(()).is_err() {
+                    // Receiver has been dropped, stop processing
+                    break;
+                }
+            }
+        });
+
+        (handle, notification_rx)
+    }
+
     /// Start state updates without consuming the EventStream
     ///
     /// This method creates a background thread for state updates while allowing
