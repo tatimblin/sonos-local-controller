@@ -5,6 +5,7 @@ mod event_stream;
 mod manager;
 mod callback_server;
 mod av_transport;
+mod rendering_control;
 
 // Public interface modules
 pub mod interface;

@@ -6,6 +6,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use super::av_transport::AVTransportSubscription;
 use super::callback_server::CallbackServer;
+use super::rendering_control::RenderingControlSubscription;
 use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
 use super::types::{RawEvent, ServiceType, StreamConfig, SubscriptionConfig, SubscriptionId};
 use crate::models::{Speaker, SpeakerId, StateChange};
@@ -470,12 +471,11 @@ impl SubscriptionManager {
                 callback_url,
                 config,
             )?),
-            ServiceType::RenderingControl => {
-                // TODO: Implement RenderingControlSubscription in future tasks
-                return Err(SubscriptionError::ServiceNotSupported {
-                    service: service_type,
-                });
-            }
+            ServiceType::RenderingControl => Box::new(RenderingControlSubscription::new(
+                speaker.clone(),
+                callback_url,
+                config,
+            )?),
             ServiceType::ContentDirectory => {
                 // TODO: Implement ContentDirectorySubscription in future tasks
                 return Err(SubscriptionError::ServiceNotSupported {
