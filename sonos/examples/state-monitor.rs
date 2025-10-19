@@ -1,10 +1,10 @@
 use sonos::{
     discover_speakers_with_timeout, get_zone_groups_from_speaker,
-    streaming::{EventStream, StreamConfig},
-    Group, PlaybackState, SonosError, SpeakerState, StateCache,
+    streaming::EventStreamBuilder,
+    PlaybackState, SonosError, SpeakerState, StateCache,
 };
 use std::io::{self, Write};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,19 +33,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state_cache = Arc::new(StateCache::new());
     state_cache.initialize(speakers.clone(), groups);
 
-    // Setup event streaming
-    let stream_config = StreamConfig::default();
-    match EventStream::new(speakers, stream_config) {
-        Ok(event_stream) => {
-            println!("✅ Event streaming active - monitoring topology changes\n");
+    // Setup event streaming with new simplified interface
+    match EventStreamBuilder::new(speakers) {
+        Ok(builder) => {
+            // Create shared state for tracking events
+            let event_count = Arc::new(std::sync::atomic::AtomicU32::new(0));
+            let start_time = std::time::Instant::now();
             
-            let (_handle, notifications) = 
-                event_stream.start_state_updates_with_notifications(state_cache.clone());
+            let state_cache_for_handler = state_cache.clone();
+            let event_count_for_handler = event_count.clone();
             
-            monitor_topology(&state_cache, notifications)?;
+            match builder
+                .with_state_cache(state_cache.clone())
+                .with_event_handler(move |_event| {
+                    // Increment event count and trigger display update
+                    let count = event_count_for_handler.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    let _ = display_topology_with_stats(&state_cache_for_handler, count, start_time);
+                })
+                .start()
+            {
+                Ok(_stream) => {
+                    println!("✅ Event streaming active - monitoring topology changes\n");
+                    
+                    // Display initial topology
+                    display_topology_with_stats(&state_cache, 0, start_time)?;
+                    
+                    println!("⏳ Waiting for topology changes...");
+                    println!("   Try playing/pausing music or grouping speakers\n");
+                    
+                    // Keep the stream alive - no manual event processing needed!
+                    loop {
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
+                }
+                Err(e) => {
+                    println!("⚠️  Streaming failed: {:?}", e);
+                    println!("Displaying static topology...\n");
+                    display_topology(&state_cache);
+                }
+            }
         }
         Err(e) => {
-            println!("⚠️  Streaming failed: {:?}", e);
+            println!("⚠️  Failed to create event stream: {:?}", e);
             println!("Displaying static topology...\n");
             display_topology(&state_cache);
         }
@@ -54,35 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn monitor_topology(
-    state_cache: &Arc<StateCache>,
-    event_rx: mpsc::Receiver<()>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut event_count = 0;
-    let start_time = std::time::Instant::now();
 
-    // Display initial topology
-    display_topology_with_stats(state_cache, event_count, start_time)?;
-
-    println!("⏳ Waiting for topology changes...");
-    println!("   Try playing/pausing music or grouping speakers\n");
-
-    // Event-driven updates - no polling!
-    loop {
-        match event_rx.recv() {
-            Ok(()) => {
-                event_count += 1;
-                display_topology_with_stats(state_cache, event_count, start_time)?;
-            }
-            Err(mpsc::RecvError) => {
-                println!("Event stream disconnected.");
-                break;
-            }
-        }
-    }
-
-    Ok(())
-}
 
 fn display_topology_with_stats(
     state_cache: &Arc<StateCache>,

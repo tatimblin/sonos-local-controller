@@ -1,16 +1,24 @@
-pub mod types;
-pub mod subscription;
-pub mod event_stream;
-pub mod manager;
-pub mod callback_server;
-pub mod av_transport;
+// Internal modules
+mod types;
+mod subscription;
+mod event_stream;
+mod manager;
+mod callback_server;
+mod av_transport;
 
-// Re-export key types for easier access
-pub use types::{
-    ServiceType, SubscriptionId, StreamConfig, SubscriptionConfig, RawEvent
+// Public interface modules
+pub mod interface;
+pub mod builder;
+
+// Re-export only the new public interface types
+pub use interface::{
+    StreamError, LifecycleHandlers, StreamStats
 };
-pub use subscription::{ServiceSubscription, SubscriptionError};
-pub use event_stream::EventStream;
-pub use manager::SubscriptionManager;
-pub use callback_server::{CallbackServer, EventRouter, ServerStatus};
-pub use av_transport::AVTransportSubscription;
+pub use builder::{EventStreamBuilder, ActiveEventStream};
+
+// Re-export essential types needed by the public interface
+pub use types::ServiceType;
+
+// Internal re-exports for use within the streaming module
+pub(crate) use types::StreamConfig;
+pub(crate) use event_stream::EventStream;
