@@ -27,8 +27,6 @@ pub struct SubscriptionManager {
     subscriptions: Arc<RwLock<HashMap<SubscriptionId, Box<dyn ServiceSubscription>>>>,
     /// Registry of active network-wide subscriptions (service_type -> subscription_id)
     network_subscriptions: Arc<RwLock<HashMap<ServiceType, SubscriptionId>>>,
-    /// Mapping of speakers by network subnet (ip_subnet -> Vec<SpeakerId>)
-    speaker_networks: Arc<RwLock<HashMap<String, Vec<SpeakerId>>>>,
     /// HTTP callback server for receiving UPnP events
     callback_server: Arc<RwLock<Option<CallbackServer>>>,
     /// Background thread handle for subscription management
@@ -79,7 +77,6 @@ impl SubscriptionManager {
         let speakers = Arc::new(RwLock::new(HashMap::new()));
         let subscriptions = Arc::new(RwLock::new(HashMap::new()));
         let network_subscriptions = Arc::new(RwLock::new(HashMap::new()));
-        let speaker_networks = Arc::new(RwLock::new(HashMap::new()));
         let callback_server_arc = Arc::new(RwLock::new(Some(callback_server)));
 
         // Create shutdown channel for background threads
@@ -100,7 +97,6 @@ impl SubscriptionManager {
             speakers,
             subscriptions,
             network_subscriptions,
-            speaker_networks,
             callback_server: callback_server_arc,
             management_thread: Some(management_thread),
             raw_event_sender: Some(raw_event_sender),
@@ -165,81 +161,82 @@ impl SubscriptionManager {
     }
 
     /// Process a raw event from the callback server
+    /// 
+    /// This method is non-blocking and avoids I/O operations in the event processing path.
+    /// Console output has been replaced with logging to prevent blocking I/O.
     fn process_raw_event(
         subscriptions: &Arc<RwLock<HashMap<SubscriptionId, Box<dyn ServiceSubscription>>>>,
         event_sender: &mpsc::Sender<StateChange>,
         raw_event: RawEvent,
     ) {
-        println!("🔄 Processing raw event in subscription manager...");
-        println!("   Subscription ID: {}", raw_event.subscription_id);
-        println!("   Event XML length: {} bytes", raw_event.event_xml.len());
+        log::debug!("Processing raw event in subscription manager");
+        log::debug!("Subscription ID: {}", raw_event.subscription_id);
+        log::debug!("Event XML length: {} bytes", raw_event.event_xml.len());
         
         let subscriptions_guard = match subscriptions.read() {
             Ok(guard) => guard,
             Err(_) => {
-                println!("❌ Failed to acquire read lock on subscriptions");
                 log::error!("Failed to acquire read lock on subscriptions");
                 return;
             }
         };
 
-        println!("📋 Current subscriptions in manager:");
+        log::debug!("Current subscriptions in manager: {}", subscriptions_guard.len());
         for (id, subscription) in subscriptions_guard.iter() {
-            println!("   {} -> Speaker: {:?}, Service: {:?}, Active: {}", 
+            log::debug!("Subscription {} -> Speaker: {:?}, Service: {:?}, Active: {}", 
                 id, subscription.speaker_id(), subscription.service_type(), subscription.is_active());
-        }
-        if subscriptions_guard.is_empty() {
-            println!("   (No subscriptions in manager)");
         }
 
         if let Some(subscription) = subscriptions_guard.get(&raw_event.subscription_id) {
-            println!("✅ Found subscription in manager, parsing event...");
+            log::debug!("Found subscription in manager, parsing event");
             
             match subscription.parse_event(&raw_event.event_xml) {
                 Ok(state_changes) => {
-                    println!("✅ Successfully parsed {} state changes", state_changes.len());
+                    log::debug!("Successfully parsed {} state changes", state_changes.len());
                     for (i, change) in state_changes.iter().enumerate() {
-                        println!("   Change {}: {:?}", i + 1, change);
+                        log::debug!("State change {}: {:?}", i + 1, change);
                         if let Err(e) = event_sender.send(change.clone()) {
-                            println!("❌ Failed to send state change {}: {}", i + 1, e);
-                            log::error!("Failed to send state change: {}", e);
+                            log::error!("Failed to send state change {}: {}", i + 1, e);
                         } else {
-                            println!("✅ Sent state change {} successfully", i + 1);
+                            log::debug!("Sent state change {} successfully", i + 1);
                         }
                     }
                 }
                 Err(e) => {
-                    println!("❌ Failed to parse event: {}", e);
+                    let service_type = subscription.service_type();
+                    let service_scope = service_type.subscription_scope();
+                    
+                    // Log with service type identification for better error isolation
                     log::warn!(
-                        "Failed to parse event for subscription {}: {}",
+                        "[{:?}] Failed to parse event for {:?} subscription {}: {}",
+                        service_scope,
+                        service_type,
                         raw_event.subscription_id,
                         e
                     );
 
-                    // Send error event
+                    // Send error event with service scope identification (non-blocking channel send)
                     let error_change = StateChange::SubscriptionError {
                         speaker_id: subscription.speaker_id(),
-                        service: subscription.service_type(),
-                        error: e.to_string(),
+                        service: service_type,
+                        error: format!("{:?} service parse error: {}", service_scope, e),
                     };
 
-                    if let Err(e) = event_sender.send(error_change) {
-                        println!("❌ Failed to send error state change: {}", e);
-                        log::error!("Failed to send error state change: {}", e);
+                    if let Err(send_err) = event_sender.send(error_change) {
+                        log::error!("[{:?}] Failed to send error state change for {:?}: {}", service_scope, service_type, send_err);
                     } else {
-                        println!("✅ Sent error state change successfully");
+                        log::debug!("[{:?}] Sent error state change for {:?} successfully", service_scope, service_type);
                     }
                 }
             }
         } else {
-            println!("❌ No subscription found in manager for ID: {}", raw_event.subscription_id);
             log::warn!(
                 "Received event for unknown subscription: {}",
                 raw_event.subscription_id
             );
         }
         
-        println!("🔄 Finished processing raw event\n");
+        log::debug!("Finished processing raw event");
     }
 
     /// Check subscriptions for renewal needs and representative speaker availability
@@ -272,11 +269,16 @@ impl SubscriptionManager {
         // Renew subscriptions that need renewal
         for subscription_id in renewals_needed {
             if let Some(subscription) = subscriptions_guard.get_mut(&subscription_id) {
+                let service_type = subscription.service_type();
+                let service_scope = service_type.subscription_scope();
+                
                 if Self::renew_subscription_with_retry(subscription, subscription_id, config) {
-                    log::debug!("Successfully renewed subscription {}", subscription_id);
+                    log::debug!("[{:?}] Successfully renewed {:?} subscription {}", service_scope, service_type, subscription_id);
                 } else {
                     log::warn!(
-                        "Failed to renew subscription {} after all retry attempts",
+                        "[{:?}] Failed to renew {:?} subscription {} after all retry attempts. Service will be isolated.",
+                        service_scope,
+                        service_type,
                         subscription_id
                     );
                     // Mark subscription as inactive
@@ -288,7 +290,10 @@ impl SubscriptionManager {
         // Mark expired subscriptions as inactive
         for subscription_id in expired_subscriptions {
             if let Some(subscription) = subscriptions_guard.get_mut(&subscription_id) {
-                log::warn!("Subscription {} has expired", subscription_id);
+                let service_type = subscription.service_type();
+                let service_scope = service_type.subscription_scope();
+                
+                log::warn!("[{:?}] {:?} subscription {} has expired and will be isolated", service_scope, service_type, subscription_id);
                 let _ = subscription.on_subscription_state_changed(false);
             }
         }
@@ -325,18 +330,78 @@ impl SubscriptionManager {
         &self,
         speaker: &Speaker,
     ) -> SubscriptionResult<Vec<SubscriptionId>> {
+        // Check if this speaker already has all required PerSpeaker subscriptions
+        let per_speaker_services: Vec<ServiceType> = self.config.enabled_services.iter()
+            .filter(|s| s.subscription_scope() == SubscriptionScope::PerSpeaker)
+            .cloned()
+            .collect();
+
+        let existing_per_speaker_subscriptions = {
+            let subscriptions = self.subscriptions.read().unwrap();
+            subscriptions.iter()
+                .filter(|(_, sub)| {
+                    sub.speaker_id() == speaker.id && 
+                    sub.subscription_scope() == SubscriptionScope::PerSpeaker
+                })
+                .count()
+        };
+
+        if existing_per_speaker_subscriptions >= per_speaker_services.len() {
+            log::info!(
+                "Speaker {} already has all {} required PerSpeaker subscriptions, skipping creation to prevent duplicates.",
+                speaker.name,
+                per_speaker_services.len()
+            );
+            return Ok(Vec::new());
+        }
+
         let mut subscription_ids = Vec::new();
         let mut satellite_errors = 0;
         let mut total_attempts = 0;
         let subscription_config = SubscriptionConfig::from_stream_config(&self.config);
 
+        // Process PerSpeaker services first to avoid conflicts with NetworkWide logic
         for service_type in &self.config.enabled_services {
-            total_attempts += 1;
-            
-            // Check if this is a network-wide service
+            if service_type.subscription_scope() == SubscriptionScope::PerSpeaker {
+                total_attempts += 1;
+                
+                // Handle per-speaker services
+                match self.create_subscription_for_service(
+                    speaker,
+                    *service_type,
+                    subscription_config.clone(),
+                ) {
+                    Ok(subscription_id) => {
+                        subscription_ids.push(subscription_id);
+                        log::info!(
+                            "Created {:?} subscription {} for speaker {}",
+                            service_type,
+                            subscription_id,
+                            speaker.name
+                        );
+                    }
+                    Err(SubscriptionError::SatelliteSpeaker) => {
+                        satellite_errors += 1;
+                        log::debug!(
+                            "Speaker {} returned 503 for {:?} service (likely satellite speaker)",
+                            speaker.name,
+                            service_type
+                        );
+                    }
+                    Err(e) => {
+                        // Use isolated error handling for PerSpeaker services
+                        self.handle_service_failure(*service_type, &speaker.name, e);
+                    }
+                }
+            }
+        }
+
+        // Then process NetworkWide services separately
+        for service_type in &self.config.enabled_services {
             if service_type.subscription_scope() == SubscriptionScope::NetworkWide {
-                // Handle network-wide services differently
-                match self.handle_network_wide_service(speaker, *service_type, subscription_config.clone()) {
+                total_attempts += 1;
+                // Simplified network-wide service handling
+                match self.create_simple_network_wide_subscription(speaker, *service_type, subscription_config.clone()) {
                     Ok(Some(subscription_id)) => {
                         subscription_ids.push(subscription_id);
                         log::info!(
@@ -362,67 +427,8 @@ impl SubscriptionManager {
                         );
                     }
                     Err(e) => {
-                        log::warn!(
-                            "Failed to create {:?} network-wide subscription for speaker {}: {}",
-                            service_type,
-                            speaker.name,
-                            e
-                        );
-
-                        // Send error event
-                        let error_change = StateChange::SubscriptionError {
-                            speaker_id: speaker.id,
-                            service: *service_type,
-                            error: e.to_string(),
-                        };
-
-                        if let Err(send_err) = self.event_sender.send(error_change) {
-                            log::error!("Failed to send subscription error event: {}", send_err);
-                        }
-                    }
-                }
-            } else {
-                // Handle per-speaker services as before
-                match self.create_subscription_for_service(
-                    speaker,
-                    *service_type,
-                    subscription_config.clone(),
-                ) {
-                    Ok(subscription_id) => {
-                        subscription_ids.push(subscription_id);
-                        log::info!(
-                            "Created {:?} subscription {} for speaker {}",
-                            service_type,
-                            subscription_id,
-                            speaker.name
-                        );
-                    }
-                    Err(SubscriptionError::SatelliteSpeaker) => {
-                        satellite_errors += 1;
-                        log::debug!(
-                            "Speaker {} returned 503 for {:?} service (likely satellite speaker)",
-                            speaker.name,
-                            service_type
-                        );
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to create {:?} subscription for speaker {}: {}",
-                            service_type,
-                            speaker.name,
-                            e
-                        );
-
-                        // Send error event
-                        let error_change = StateChange::SubscriptionError {
-                            speaker_id: speaker.id,
-                            service: *service_type,
-                            error: e.to_string(),
-                        };
-
-                        if let Err(send_err) = self.event_sender.send(error_change) {
-                            log::error!("Failed to send subscription error event: {}", send_err);
-                        }
+                        // Use isolated error handling for NetworkWide services
+                        self.handle_service_failure(*service_type, &speaker.name, e);
                     }
                 }
             }
@@ -436,12 +442,11 @@ impl SubscriptionManager {
         Ok(subscription_ids)
     }
 
-    /// Handle network-wide service subscription creation and management
+    /// Simplified network-wide service subscription creation
     /// 
-    /// Returns Ok(Some(subscription_id)) if a new subscription was created,
-    /// Ok(None) if an existing subscription is being reused,
-    /// or Err if the operation failed.
-    fn handle_network_wide_service(
+    /// Ultra-simple approach: just check if we already have a subscription for this service type.
+    /// If not, create one using the current speaker. No failover, no recovery, no complexity.
+    fn create_simple_network_wide_subscription(
         &self,
         speaker: &Speaker,
         service_type: ServiceType,
@@ -454,55 +459,22 @@ impl SubscriptionManager {
         };
 
         if let Some(subscription_id) = existing_subscription_id {
-            // Verify the subscription is still active
-            let is_active = {
-                let subscriptions = self.subscriptions.read().unwrap();
-                subscriptions.get(&subscription_id)
-                    .map(|sub| sub.is_active())
-                    .unwrap_or(false)
-            };
-
-            if is_active {
-                // Update the network speakers list for the existing subscription
-                self.update_network_subscription_speakers(subscription_id, speaker)?;
-                
-                log::debug!(
-                    "Reusing existing {:?} network-wide subscription {} for speaker {} (updated speaker list)",
-                    service_type,
-                    subscription_id,
-                    speaker.name
-                );
-                return Ok(None);
-            } else {
-                // If we get here, the subscription exists in the registry but is not active
-                // We'll clean it up and create a new one
-                self.cleanup_inactive_network_subscription(service_type);
-            }
+            log::debug!(
+                "Reusing existing {:?} network-wide subscription {} (no availability checks)",
+                service_type,
+                subscription_id
+            );
+            return Ok(None); // Always reuse existing subscription
         }
 
-        // Get speakers in the same network to determine if we should create a subscription
-        let network_speakers = self.get_speakers_in_same_network(speaker);
-        
-        // Select a representative speaker for the network-wide subscription
-        let representative_speaker_id = self.select_representative_speaker(&network_speakers)
-            .unwrap_or(speaker.id); // Fallback to current speaker if no representative found
+        // Create a new network-wide subscription using the current speaker
+        log::info!(
+            "Creating new {:?} network-wide subscription using speaker {}",
+            service_type,
+            speaker.name
+        );
 
-        // Get the representative speaker details
-        let representative_speaker = {
-            let speakers = self.speakers.read().unwrap();
-            speakers.get(&representative_speaker_id).cloned()
-        };
-
-        let representative_speaker = match representative_speaker {
-            Some(speaker) => speaker,
-            None => {
-                // If representative speaker not found, use the current speaker
-                speaker.clone()
-            }
-        };
-
-        // Create the network-wide subscription using the representative speaker
-        match self.create_subscription_for_service(&representative_speaker, service_type, config) {
+        match self.create_subscription_for_service(speaker, service_type, config) {
             Ok(subscription_id) => {
                 // Register this as a network-wide subscription
                 {
@@ -511,25 +483,23 @@ impl SubscriptionManager {
                 }
                 
                 log::info!(
-                    "Created new {:?} network-wide subscription {} using representative speaker {}",
+                    "Created new {:?} network-wide subscription {} using speaker {}",
                     service_type,
                     subscription_id,
-                    representative_speaker.name
+                    speaker.name
                 );
                 
                 Ok(Some(subscription_id))
             }
             Err(e) => {
-                log::warn!(
-                    "Failed to create {:?} network-wide subscription using representative speaker {}: {}",
-                    service_type,
-                    representative_speaker.name,
-                    e
-                );
+                // Use isolated error handling for NetworkWide service creation failures
+                self.handle_service_failure(service_type, &speaker.name, e.clone());
                 Err(e)
             }
         }
     }
+
+
 
     /// Clean up an inactive network-wide subscription from the registry
     fn cleanup_inactive_network_subscription(&self, service_type: ServiceType) {
@@ -543,115 +513,141 @@ impl SubscriptionManager {
         }
     }
 
-    /// Update the network speakers list for an existing network-wide subscription
+    /// Handle service failure with proper error isolation
     /// 
-    /// This method is called when a new speaker is added to a network that already
-    /// has a network-wide subscription, ensuring the subscription can distribute
-    /// events to all speakers in the network.
-    fn update_network_subscription_speakers(
-        &self,
-        subscription_id: SubscriptionId,
-        new_speaker: &Speaker,
-    ) -> SubscriptionResult<()> {
-        // Get network speakers first to avoid nested lock acquisition
-        let network_speakers = self.get_speakers_in_same_network(new_speaker);
-        let network_speaker_count = {
-            let speakers = self.speakers.read().unwrap();
-            network_speakers
-                .iter()
-                .filter(|&&speaker_id| speakers.contains_key(&speaker_id))
-                .count()
-        };
-
-        // Now acquire the subscriptions lock
-        let subscriptions = self.subscriptions.read().unwrap();
-        
-        if let Some(subscription) = subscriptions.get(&subscription_id) {
-            // Check if this is a ZoneGroupTopology subscription that supports network speaker updates
-            if subscription.service_type() == ServiceType::ZoneGroupTopology {
-                // Update the subscription's network speakers list
-                // Note: This requires the subscription to support dynamic speaker list updates
-                // For now, we'll log this operation as the ZoneGroupTopologySubscription
-                // will handle event distribution based on the current network state
-                log::debug!(
-                    "Updated network speakers list for subscription {} (now {} speakers in network)",
-                    subscription_id,
-                    network_speaker_count
+    /// This method ensures that PerSpeaker service failures don't affect NetworkWide services
+    /// and vice versa, providing proper error logging with service type identification.
+    fn handle_service_failure(&self, service_type: ServiceType, speaker_name: &str, error: SubscriptionError) {
+        match service_type.subscription_scope() {
+            SubscriptionScope::PerSpeaker => {
+                // Log error but continue with other speakers - don't affect NetworkWide services
+                log::warn!(
+                    "[PerSpeaker] Service {:?} failed for speaker '{}': {}. Other services will continue normally.",
+                    service_type,
+                    speaker_name,
+                    error
                 );
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Check if a network has any remaining speakers and clean up network-wide subscriptions if empty
-    /// 
-    /// This method is called when speakers are removed to ensure network-wide subscriptions
-    /// are properly cleaned up when no speakers remain in a network.
-    fn cleanup_empty_network_subscriptions(&self, removed_speaker: &Speaker) -> SubscriptionResult<()> {
-        let network_subnet = Self::extract_network_subnet(&removed_speaker.ip_address);
-        
-        // Check if there are any remaining speakers in this network
-        let remaining_speakers_in_network = {
-            let speaker_networks = self.speaker_networks.read().unwrap();
-            speaker_networks
-                .get(&network_subnet)
-                .map(|speakers| speakers.len())
-                .unwrap_or(0)
-        };
-
-        // If no speakers remain in the network, clean up network-wide subscriptions
-        if remaining_speakers_in_network == 0 {
-            log::info!(
-                "No speakers remaining in network {}, cleaning up network-wide subscriptions",
-                network_subnet
-            );
-
-            // Get all network-wide subscriptions that might need cleanup
-            let network_subscriptions_to_check: Vec<(ServiceType, SubscriptionId)> = {
-                let network_subscriptions = self.network_subscriptions.read().unwrap();
-                network_subscriptions.iter().map(|(&service_type, &sub_id)| (service_type, sub_id)).collect()
-            };
-
-            for (service_type, subscription_id) in network_subscriptions_to_check {
-                // Check if this subscription was using a speaker from the now-empty network
-                let subscription_uses_empty_network = {
-                    let subscriptions = self.subscriptions.read().unwrap();
-                    if let Some(subscription) = subscriptions.get(&subscription_id) {
-                        let subscription_speaker_network = Self::extract_network_subnet(
-                            &self.get_speaker_ip_for_subscription(subscription.speaker_id()).unwrap_or_default()
-                        );
-                        subscription_speaker_network == network_subnet
-                    } else {
-                        false
-                    }
+                
+                // Send isolated error event for PerSpeaker service
+                let error_change = StateChange::SubscriptionError {
+                    speaker_id: crate::models::SpeakerId::from_udn(&format!("uuid:RINCON_{}::1", speaker_name)),
+                    service: service_type,
+                    error: format!("PerSpeaker service failure: {}", error),
                 };
 
-                if subscription_uses_empty_network {
-                    log::info!(
-                        "Removing {:?} network-wide subscription {} for empty network {}",
-                        service_type,
-                        subscription_id,
-                        network_subnet
-                    );
+                if let Err(send_err) = self.event_sender.send(error_change) {
+                    log::error!("[PerSpeaker] Failed to send isolated error event for {:?}: {}", service_type, send_err);
+                }
+            }
+            SubscriptionScope::NetworkWide => {
+                // Clean up failed NetworkWide subscription and log error
+                self.cleanup_failed_network_subscription(service_type);
+                log::error!(
+                    "[NetworkWide] Service {:?} failed using speaker '{}': {}. Attempting graceful degradation.",
+                    service_type,
+                    speaker_name,
+                    error
+                );
 
-                    // Remove the subscription
-                    self.remove_subscription(subscription_id)?;
-                    
-                    // Clean up from network registry
-                    self.cleanup_inactive_network_subscription(service_type);
+                // Send isolated error event for NetworkWide service
+                let error_change = StateChange::SubscriptionError {
+                    speaker_id: crate::models::SpeakerId::from_udn(&format!("uuid:RINCON_{}::1", speaker_name)),
+                    service: service_type,
+                    error: format!("NetworkWide service failure: {}", error),
+                };
+
+                if let Err(send_err) = self.event_sender.send(error_change) {
+                    log::error!("[NetworkWide] Failed to send isolated error event for {:?}: {}", service_type, send_err);
+                }
+            }
+        }
+    }
+
+    /// Clean up a failed network-wide subscription
+    /// 
+    /// This method handles cleanup when a NetworkWide service fails, ensuring
+    /// the registry remains consistent and doesn't affect PerSpeaker services.
+    fn cleanup_failed_network_subscription(&self, service_type: ServiceType) {
+        if service_type.subscription_scope() != SubscriptionScope::NetworkWide {
+            log::warn!("Attempted to clean up non-NetworkWide service {:?} as NetworkWide", service_type);
+            return;
+        }
+
+        let mut network_subscriptions = self.network_subscriptions.write().unwrap();
+        if let Some(subscription_id) = network_subscriptions.remove(&service_type) {
+            log::info!(
+                "[NetworkWide] Cleaned up failed {:?} subscription {} from registry",
+                service_type,
+                subscription_id
+            );
+
+            // Also remove from main subscriptions registry
+            let mut subscriptions = self.subscriptions.write().unwrap();
+            if let Some(mut subscription) = subscriptions.remove(&subscription_id) {
+                // Attempt graceful unsubscribe, but don't fail if it doesn't work
+                if let Err(e) = subscription.unsubscribe() {
+                    log::debug!("Failed to unsubscribe failed NetworkWide service (expected): {}", e);
+                }
+                log::debug!("[NetworkWide] Removed failed subscription {} from main registry", subscription_id);
+            }
+        } else {
+            log::debug!("[NetworkWide] No active subscription found for {:?} during cleanup", service_type);
+        }
+    }
+
+    /// Validate subscription registry consistency
+    /// 
+    /// This method checks for registry corruption and attempts to recover,
+    /// ensuring error isolation between service types.
+    fn validate_subscription_registry(&self) -> Result<(), SubscriptionError> {
+        let network_subscriptions = self.network_subscriptions.read().unwrap();
+        let subscriptions = self.subscriptions.read().unwrap();
+
+        let mut corruption_detected = false;
+        let mut corruption_messages = Vec::new();
+
+        // Check that all NetworkWide subscriptions in registry exist in main subscriptions
+        for (service_type, &subscription_id) in network_subscriptions.iter() {
+            if !subscriptions.contains_key(&subscription_id) {
+                corruption_detected = true;
+                corruption_messages.push(format!(
+                    "NetworkWide service {:?} references non-existent subscription {}",
+                    service_type, subscription_id
+                ));
+            } else if let Some(subscription) = subscriptions.get(&subscription_id) {
+                // Verify service type matches
+                if subscription.service_type() != *service_type {
+                    corruption_detected = true;
+                    corruption_messages.push(format!(
+                        "NetworkWide registry mismatch: expected {:?}, found {:?} for subscription {}",
+                        service_type, subscription.service_type(), subscription_id
+                    ));
+                }
+                
+                // Verify subscription scope
+                if subscription.subscription_scope() != SubscriptionScope::NetworkWide {
+                    corruption_detected = true;
+                    corruption_messages.push(format!(
+                        "Non-NetworkWide subscription {} registered as NetworkWide for service {:?}",
+                        subscription_id, service_type
+                    ));
                 }
             }
         }
 
+        if corruption_detected {
+            let message = corruption_messages.join("; ");
+            log::error!("[Registry] Subscription registry corruption detected: {}", message);
+            return Err(SubscriptionError::RegistryCorruption { message });
+        }
+
+        log::debug!("[Registry] Subscription registry validation passed");
         Ok(())
     }
 
-    /// Get the IP address for a speaker by its ID
-    fn get_speaker_ip_for_subscription(&self, speaker_id: SpeakerId) -> Option<String> {
-        let speakers = self.speakers.read().unwrap();
-        speakers.get(&speaker_id).map(|speaker| speaker.ip_address.clone())
-    }
+
+
+
 
     /// Create a subscription for a specific service on a speaker with retry logic
     fn create_subscription_for_service(
@@ -791,21 +787,11 @@ impl SubscriptionManager {
                 });
             }
             ServiceType::ZoneGroupTopology => {
-                // For ZoneGroupTopology, we need to create a network-wide subscription
-                // Get all speakers in the same network for event distribution
-                let network_speakers = self.get_speakers_in_same_network(speaker);
-                let network_speaker_details: Vec<Speaker> = {
-                    let speakers = self.speakers.read().unwrap();
-                    network_speakers
-                        .iter()
-                        .filter_map(|&speaker_id| speakers.get(&speaker_id).cloned())
-                        .collect()
-                };
-
+                // Simplified ZoneGroupTopology subscription - just use the current speaker
+                // No complex network speaker management needed
                 use super::zone_group_topology::ZoneGroupTopologySubscription;
                 Box::new(ZoneGroupTopologySubscription::new(
                     speaker.clone(),
-                    network_speaker_details,
                     callback_url,
                     config,
                 )?)
@@ -854,144 +840,13 @@ impl SubscriptionManager {
         Duration::from_millis(capped_backoff_ms)
     }
 
-    /// Extract network subnet from IP address for network-wide service grouping
-    /// 
-    /// This method extracts the first 3 octets of an IPv4 address to group speakers
-    /// by network subnet. For example, "192.168.1.100" becomes "192.168.1".
-    fn extract_network_subnet(ip_address: &str) -> String {
-        let parts: Vec<&str> = ip_address.split('.').collect();
-        if parts.len() >= 3 {
-            format!("{}.{}.{}", parts[0], parts[1], parts[2])
-        } else {
-            // Fallback for invalid IP addresses
-            ip_address.to_string()
-        }
-    }
 
-    /// Update speaker network mapping when a speaker is added or updated
-    fn update_speaker_network_mapping(&self, speaker: &Speaker) {
-        let network_subnet = Self::extract_network_subnet(&speaker.ip_address);
-        
-        let mut speaker_networks = self.speaker_networks.write().unwrap();
-        
-        // Remove speaker from any existing networks first
-        for (_, speakers_in_network) in speaker_networks.iter_mut() {
-            speakers_in_network.retain(|&id| id != speaker.id);
-        }
-        
-        // Add speaker to the correct network
-        speaker_networks
-            .entry(network_subnet)
-            .or_insert_with(Vec::new)
-            .push(speaker.id);
-            
-        // Clean up empty networks
-        speaker_networks.retain(|_, speakers| !speakers.is_empty());
-    }
 
-    /// Remove speaker from network mapping
-    fn remove_speaker_from_network_mapping(&self, speaker_id: SpeakerId) {
-        let mut speaker_networks = self.speaker_networks.write().unwrap();
-        
-        // Remove speaker from all networks
-        for (_, speakers_in_network) in speaker_networks.iter_mut() {
-            speakers_in_network.retain(|&id| id != speaker_id);
-        }
-        
-        // Clean up empty networks
-        speaker_networks.retain(|_, speakers| !speakers.is_empty());
-    }
 
-    /// Get all speakers in the same network as the given speaker
-    fn get_speakers_in_same_network(&self, speaker: &Speaker) -> Vec<SpeakerId> {
-        let network_subnet = Self::extract_network_subnet(&speaker.ip_address);
-        let speaker_networks = self.speaker_networks.read().unwrap();
-        
-        speaker_networks
-            .get(&network_subnet)
-            .cloned()
-            .unwrap_or_else(Vec::new)
-    }
 
-    /// Select a representative speaker for network-wide services
-    /// 
-    /// Priority order:
-    /// 1. Coordinator speakers (speakers that are group coordinators)
-    /// 2. Non-satellite speakers (speakers that can accept subscriptions)
-    /// 3. Most recently discovered (newest speakers in the network)
-    /// 4. Fallback to any available speaker
-    fn select_representative_speaker(&self, network_speakers: &[SpeakerId]) -> Option<SpeakerId> {
-        if network_speakers.is_empty() {
-            return None;
-        }
 
-        let speakers = self.speakers.read().unwrap();
-        
-        // Collect available speakers with their details
-        let mut available_speakers: Vec<(SpeakerId, &Speaker)> = network_speakers
-            .iter()
-            .filter_map(|&speaker_id| {
-                speakers.get(&speaker_id).map(|speaker| (speaker_id, speaker))
-            })
-            .collect();
 
-        if available_speakers.is_empty() {
-            return None;
-        }
 
-        // Priority 1: Prefer non-satellite speakers that are likely coordinators
-        // Combine coordinator and non-satellite logic for better selection
-        let preferred_candidates: Vec<_> = available_speakers
-            .iter()
-            .filter(|(_, speaker)| {
-                // Prefer speakers that are not satellites or subs
-                let is_not_satellite = !speaker.model_name.to_lowercase().contains("satellite") &&
-                                      !speaker.model_name.to_lowercase().contains("sub");
-                
-                // Prefer speakers with no satellites (likely coordinators) or main speakers
-                let is_likely_coordinator = speaker.satellites.is_empty();
-                
-                is_not_satellite && is_likely_coordinator
-            })
-            .collect();
-
-        if !preferred_candidates.is_empty() {
-            // Among preferred candidates, select the one with the lowest IP (most stable)
-            if let Some((speaker_id, _)) = preferred_candidates
-                .iter()
-                .min_by_key(|(_, speaker)| &speaker.ip_address)
-            {
-                return Some(*speaker_id);
-            }
-        }
-
-        // Priority 2: Non-satellite speakers (even if they have satellites)
-        let non_satellite_candidates: Vec<_> = available_speakers
-            .iter()
-            .filter(|(_, speaker)| {
-                !speaker.model_name.to_lowercase().contains("satellite") &&
-                !speaker.model_name.to_lowercase().contains("sub")
-            })
-            .collect();
-
-        if !non_satellite_candidates.is_empty() {
-            // Among non-satellite candidates, prefer the one with the lowest IP (most stable)
-            if let Some((speaker_id, _)) = non_satellite_candidates
-                .iter()
-                .min_by_key(|(_, speaker)| &speaker.ip_address)
-            {
-                return Some(*speaker_id);
-            }
-        }
-
-        // Priority 3: Most recently discovered (newest speakers in the network)
-        // Since we don't track discovery time, we'll use IP address as a proxy
-        // Lower IP addresses are often assigned first and may be more stable
-        available_speakers.sort_by_key(|(_, speaker)| &speaker.ip_address);
-        
-        // Priority 4: Fallback to any available speaker
-        available_speakers.first().map(|(speaker_id, _)| *speaker_id)
-    }
 
     /// Remove all subscriptions for a speaker
     fn remove_subscriptions_for_speaker(&self, speaker_id: SpeakerId) -> SubscriptionResult<()> {
@@ -1041,9 +896,19 @@ impl SubscriptionManager {
         Ok(())
     }
 
+    /// Validate subscription registry consistency (public interface)
+    /// 
+    /// This method can be called externally to check for registry corruption
+    /// and ensure proper error isolation between service types.
+    pub fn validate_registry(&self) -> SubscriptionResult<()> {
+        self.validate_subscription_registry()
+    }
+
     /// Add a speaker to the subscription manager
     ///
     /// This method will create subscriptions for all enabled services for the given speaker.
+    /// If the speaker already exists, it will only update the speaker information without
+    /// recreating subscriptions, preserving per-speaker subscriptions during group changes.
     ///
     /// # Arguments
     ///
@@ -1056,27 +921,34 @@ impl SubscriptionManager {
         let speaker_id = speaker.id;
 
         // Check if speaker already exists
-        {
+        let speaker_already_exists = {
             let speakers = self.speakers.read().unwrap();
-            if speakers.contains_key(&speaker_id) {
-                log::debug!("Speaker {} already exists, updating", speaker.name);
+            speakers.contains_key(&speaker_id)
+        };
+
+        if speaker_already_exists {
+            log::debug!("Speaker {} already exists, updating speaker info only (keeping existing subscriptions)", speaker.name);
+            
+            // Update speaker info but don't recreate subscriptions
+            {
+                let mut speakers = self.speakers.write().unwrap();
+                speakers.insert(speaker_id, speaker.clone());
             }
+            
+            return Ok(());
         }
 
-        // Add speaker to storage
+        // Add new speaker to storage
         {
             let mut speakers = self.speakers.write().unwrap();
             speakers.insert(speaker_id, speaker.clone());
         }
 
-        // Update network mapping for network-wide services
-        self.update_speaker_network_mapping(&speaker);
-
-        // Create subscriptions for all enabled services
+        // Create subscriptions for all enabled services (only for new speakers)
         let subscription_ids = self.create_subscriptions_for_speaker(&speaker)?;
 
         log::info!(
-            "Added speaker {} with {} subscriptions",
+            "Added new speaker {} with {} subscriptions",
             speaker.name,
             subscription_ids.len()
         );
@@ -1096,12 +968,6 @@ impl SubscriptionManager {
     ///
     /// Returns Ok(()) if the speaker was removed successfully, or an error if the operation failed.
     pub fn remove_speaker(&self, speaker_id: SpeakerId) -> SubscriptionResult<()> {
-        // Get speaker details before removal for network cleanup
-        let removed_speaker = {
-            let speakers = self.speakers.read().unwrap();
-            speakers.get(&speaker_id).cloned()
-        };
-
         // Remove speaker from storage
         let speaker_name = {
             let mut speakers = self.speakers.write().unwrap();
@@ -1113,8 +979,7 @@ impl SubscriptionManager {
             return Ok(());
         }
 
-        // Remove speaker from network mapping
-        self.remove_speaker_from_network_mapping(speaker_id);
+
 
         // Check if this speaker was used for any network-wide subscriptions
         self.handle_network_wide_speaker_removal(speaker_id)?;
@@ -1122,10 +987,7 @@ impl SubscriptionManager {
         // Remove all per-speaker subscriptions for this speaker
         self.remove_subscriptions_for_speaker(speaker_id)?;
 
-        // Clean up network-wide subscriptions if this was the last speaker in the network
-        if let Some(speaker) = removed_speaker {
-            self.cleanup_empty_network_subscriptions(&speaker)?;
-        }
+
 
         log::info!(
             "Removed speaker {} and all its subscriptions",
@@ -1136,6 +998,9 @@ impl SubscriptionManager {
     }
 
     /// Handle the removal of a speaker that might be used for network-wide subscriptions
+    /// 
+    /// Simplified approach: only clean up network-wide subscriptions, don't try to recreate them.
+    /// They will be recreated naturally when the next speaker is added.
     fn handle_network_wide_speaker_removal(&self, removed_speaker_id: SpeakerId) -> SubscriptionResult<()> {
         // Check if any network-wide subscriptions are using this speaker
         let network_subscriptions_to_check: Vec<(ServiceType, SubscriptionId)> = {
@@ -1154,7 +1019,7 @@ impl SubscriptionManager {
 
             if subscription_uses_removed_speaker {
                 log::info!(
-                    "Network-wide subscription {} for {:?} was using removed speaker {:?}, handling failover",
+                    "Network-wide subscription {} for {:?} was using removed speaker {:?}, cleaning up",
                     subscription_id,
                     service_type,
                     removed_speaker_id
@@ -1166,189 +1031,17 @@ impl SubscriptionManager {
                 // Clean up from network registry
                 self.cleanup_inactive_network_subscription(service_type);
 
-                // Try to create a new network-wide subscription with a different representative speaker
-                // We'll do this by finding any remaining speaker in the network and triggering subscription creation
-                if let Some(replacement_speaker) = self.find_replacement_speaker_for_network_service(service_type) {
-                    let subscription_config = SubscriptionConfig::from_stream_config(&self.config);
-                    
-                    match self.handle_network_wide_service(&replacement_speaker, service_type, subscription_config) {
-                        Ok(Some(new_subscription_id)) => {
-                            log::info!(
-                                "Successfully created replacement {:?} network-wide subscription {} using speaker {}",
-                                service_type,
-                                new_subscription_id,
-                                replacement_speaker.name
-                            );
-                        }
-                        Ok(None) => {
-                            log::debug!("Replacement subscription already exists for {:?}", service_type);
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "Failed to create replacement {:?} network-wide subscription: {}",
-                                service_type,
-                                e
-                            );
-                        }
-                    }
-                } else {
-                    log::info!(
-                        "No replacement speaker available for {:?} network-wide subscription",
-                        service_type
-                    );
-                }
+                log::info!(
+                    "Cleaned up {:?} network-wide subscription. Will be recreated when next speaker is added.",
+                    service_type
+                );
             }
         }
 
         Ok(())
     }
 
-    /// Find a replacement speaker for a network-wide service when the current representative is removed
-    fn find_replacement_speaker_for_network_service(&self, service_type: ServiceType) -> Option<Speaker> {
-        let speakers = self.speakers.read().unwrap();
-        
-        if speakers.is_empty() {
-            return None;
-        }
-
-        // Get all available speakers
-        let all_speaker_ids: Vec<SpeakerId> = speakers.keys().copied().collect();
-        
-        // Use the representative speaker selection algorithm to find the best replacement
-        if let Some(replacement_id) = self.select_representative_speaker(&all_speaker_ids) {
-            speakers.get(&replacement_id).cloned()
-        } else {
-            None
-        }
-    }
-
-    /// Detect if a representative speaker for a network-wide service is unavailable
-    /// 
-    /// This method checks if the speaker used for a network-wide subscription is still
-    /// reachable and active. If not, it triggers automatic failover.
-    fn detect_representative_speaker_unavailability(&self) -> SubscriptionResult<()> {
-        let network_subscriptions_to_check: Vec<(ServiceType, SubscriptionId)> = {
-            let network_subscriptions = self.network_subscriptions.read().unwrap();
-            network_subscriptions.iter().map(|(&service_type, &sub_id)| (service_type, sub_id)).collect()
-        };
-
-        for (service_type, subscription_id) in network_subscriptions_to_check {
-            // Get the speaker used by this network-wide subscription
-            let representative_speaker_id = {
-                let subscriptions = self.subscriptions.read().unwrap();
-                subscriptions.get(&subscription_id)
-                    .map(|sub| sub.speaker_id())
-            };
-
-            if let Some(speaker_id) = representative_speaker_id {
-                // Check if the representative speaker is still available and reachable
-                let is_speaker_available = {
-                    let speakers = self.speakers.read().unwrap();
-                    speakers.contains_key(&speaker_id)
-                };
-
-                let is_subscription_active = {
-                    let subscriptions = self.subscriptions.read().unwrap();
-                    subscriptions.get(&subscription_id)
-                        .map(|sub| sub.is_active())
-                        .unwrap_or(false)
-                };
-
-                // If speaker is unavailable or subscription is inactive, trigger failover
-                if !is_speaker_available || !is_subscription_active {
-                    log::warn!(
-                        "Representative speaker {:?} for {:?} service is unavailable or inactive, triggering failover",
-                        speaker_id,
-                        service_type
-                    );
-
-                    self.trigger_representative_speaker_failover(service_type, subscription_id)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Trigger automatic failover to a new representative speaker
-    /// 
-    /// This method is called when the current representative speaker becomes unavailable.
-    /// It selects a new representative and recreates the network-wide subscription.
-    fn trigger_representative_speaker_failover(
-        &self, 
-        service_type: ServiceType, 
-        old_subscription_id: SubscriptionId
-    ) -> SubscriptionResult<()> {
-        log::info!(
-            "Triggering failover for {:?} network-wide subscription {}",
-            service_type,
-            old_subscription_id
-        );
-
-        // Remove the old subscription
-        self.remove_subscription(old_subscription_id)?;
-        
-        // Clean up from network registry
-        self.cleanup_inactive_network_subscription(service_type);
-
-        // Find a replacement speaker
-        if let Some(replacement_speaker) = self.find_replacement_speaker_for_network_service(service_type) {
-            let subscription_config = SubscriptionConfig::from_stream_config(&self.config);
-            
-            match self.handle_network_wide_service(&replacement_speaker, service_type, subscription_config) {
-                Ok(Some(new_subscription_id)) => {
-                    log::info!(
-                        "Successfully failed over {:?} network-wide subscription to new representative speaker {} (subscription {})",
-                        service_type,
-                        replacement_speaker.name,
-                        new_subscription_id
-                    );
-
-                    // Send a state change event to notify about the failover
-                    let failover_event = StateChange::SubscriptionError {
-                        speaker_id: replacement_speaker.id,
-                        service: service_type,
-                        error: format!("Representative speaker failover completed successfully"),
-                    };
-
-                    if let Err(e) = self.event_sender.send(failover_event) {
-                        log::warn!("Failed to send failover notification event: {}", e);
-                    }
-
-                    Ok(())
-                }
-                Ok(None) => {
-                    log::debug!("Replacement subscription already exists for {:?}", service_type);
-                    Ok(())
-                }
-                Err(e) => {
-                    log::error!(
-                        "Failed to create replacement {:?} network-wide subscription during failover: {}",
-                        service_type,
-                        e
-                    );
-
-                    // Send error event
-                    let error_event = StateChange::SubscriptionError {
-                        speaker_id: replacement_speaker.id,
-                        service: service_type,
-                        error: format!("Failover failed: {}", e),
-                    };
-
-                    if let Err(send_err) = self.event_sender.send(error_event) {
-                        log::error!("Failed to send failover error event: {}", send_err);
-                    }
-
-                    Err(e)
-                }
-            }
-        } else {
-            let error_msg = format!("No replacement speaker available for {:?} network-wide subscription", service_type);
-            log::error!("{}", error_msg);
-
-            Err(SubscriptionError::SubscriptionFailed(error_msg))
-        }
-    }
+    // Removed complex failover and recovery logic to prevent subscription recreation issues
 
     /// Refresh all subscriptions
     ///
@@ -1358,13 +1051,14 @@ impl SubscriptionManager {
         Ok(())
     }
 
-    /// Check representative speaker availability and trigger failover if needed
+    /// Check representative speaker availability (simplified - no automatic failover)
     ///
-    /// This method should be called periodically to ensure network-wide subscriptions
-    /// are using available representative speakers. If a representative speaker becomes
-    /// unavailable, this method will automatically trigger failover to a new speaker.
+    /// This method is now a no-op to prevent automatic subscription recreation.
+    /// Network-wide subscriptions will be recreated naturally when speakers are added.
     pub fn check_representative_speaker_availability(&self) -> SubscriptionResult<()> {
-        self.detect_representative_speaker_unavailability()
+        // Simplified: no automatic failover to prevent subscription recreation issues
+        log::debug!("Representative speaker availability check disabled to prevent subscription recreation");
+        Ok(())
     }
 
     /// Get information about current representative speakers for network-wide services
@@ -1445,10 +1139,6 @@ impl SubscriptionManager {
         {
             let mut network_subscriptions = self.network_subscriptions.write().unwrap();
             network_subscriptions.clear();
-        }
-        {
-            let mut speaker_networks = self.speaker_networks.write().unwrap();
-            speaker_networks.clear();
         }
 
         log::info!("Subscription manager shutdown complete");
@@ -1628,66 +1318,19 @@ impl SubscriptionManager {
         callback_server.as_ref().map(|s| s.port())
     }
 
-    /// Attempt to recover failed subscriptions
+    /// Attempt to recover failed subscriptions (simplified to prevent subscription recreation)
     ///
-    /// This method checks for inactive subscriptions and attempts to recreate them.
-    /// It's useful for recovering from network outages or device restarts.
+    /// This method is now simplified to prevent automatic subscription recreation
+    /// that can cause callback registration conflicts.
     pub fn recover_failed_subscriptions(&self) -> SubscriptionResult<RecoveryReport> {
-        let mut recovery_report = RecoveryReport {
+        let recovery_report = RecoveryReport {
             total_attempts: 0,
             successful_recoveries: 0,
             failed_recoveries: Vec::new(),
         };
 
-        // Get all speakers that should have subscriptions but don't have active ones
-        let speakers_needing_recovery: Vec<Speaker> = {
-            let speakers = self.speakers.read().unwrap();
-            let subscriptions = self.subscriptions.read().unwrap();
-
-            speakers
-                .values()
-                .filter(|speaker| {
-                    // Check if this speaker has any active subscriptions
-                    !subscriptions
-                        .values()
-                        .any(|sub| sub.speaker_id() == speaker.id && sub.is_active())
-                })
-                .cloned()
-                .collect()
-        };
-
-        for speaker in speakers_needing_recovery {
-            recovery_report.total_attempts += 1;
-
-            match self.create_subscriptions_for_speaker(&speaker) {
-                Ok(subscription_ids) => {
-                    recovery_report.successful_recoveries += 1;
-                    log::info!(
-                        "Successfully recovered {} subscriptions for speaker {}",
-                        subscription_ids.len(),
-                        speaker.name
-                    );
-                }
-                Err(e) => {
-                    recovery_report.failed_recoveries.push(FailedRecovery {
-                        speaker_id: speaker.id,
-                        speaker_name: speaker.name.clone(),
-                        error: e.to_string(),
-                    });
-                    log::warn!(
-                        "Failed to recover subscriptions for speaker {}: {}",
-                        speaker.name,
-                        e
-                    );
-                }
-            }
-        }
-
-        log::info!(
-            "Recovery complete: {}/{} speakers recovered",
-            recovery_report.successful_recoveries,
-            recovery_report.total_attempts
-        );
+        log::debug!("Subscription recovery disabled to prevent callback registration conflicts");
+        log::debug!("Subscriptions will be created naturally when speakers are added");
 
         Ok(recovery_report)
     }
@@ -1719,7 +1362,7 @@ impl SubscriptionManager {
         }
     }
 
-    /// Perform health check on all subscriptions and attempt recovery
+    /// Perform health check on all subscriptions (simplified - no automatic recovery)
     pub fn health_check_and_recover(&self) -> SubscriptionResult<HealthCheckReport> {
         let mut report = HealthCheckReport {
             total_speakers: 0,
@@ -1749,23 +1392,8 @@ impl SubscriptionManager {
         report.total_subscriptions = stats.total_subscriptions;
         report.active_subscriptions = stats.active_subscriptions;
 
-        // Attempt recovery if we have reachable speakers but missing subscriptions
-        if report.reachable_speakers > 0
-            && report.active_subscriptions
-                < report.reachable_speakers * self.config.enabled_services.len()
-        {
-            log::info!("Attempting subscription recovery due to health check findings");
-            report.recovery_attempted = true;
-
-            match self.recover_failed_subscriptions() {
-                Ok(recovery_report) => {
-                    report.recovery_report = Some(recovery_report);
-                }
-                Err(e) => {
-                    log::error!("Recovery attempt failed: {}", e);
-                }
-            }
-        }
+        // No automatic recovery to prevent subscription recreation issues
+        log::debug!("Health check complete. Automatic recovery disabled to prevent callback conflicts.");
 
         Ok(report)
     }
@@ -1928,11 +1556,16 @@ mod tests {
 
         // Add speaker - this will fail because we can't actually connect to a real device
         // but we can test that the method doesn't panic
-        let _add_result = manager.add_speaker(speaker);
+        let _add_result = manager.add_speaker(speaker.clone());
         // The result may be an error due to network issues, but that's expected in tests
 
         // Test speaker count (should be 1 even if subscription creation failed)
         assert_eq!(manager.speaker_count(), 1);
+
+        // Test adding the same speaker again (simulating group change)
+        // This should not create duplicate subscriptions
+        let _add_again_result = manager.add_speaker(speaker);
+        assert_eq!(manager.speaker_count(), 1); // Should still be 1
 
         // Remove speaker
         assert!(manager.remove_speaker(speaker_id).is_ok());
@@ -2140,220 +1773,4 @@ mod network_tests {
         SubscriptionManager::new(config, event_sender).unwrap()
     }
 
-    #[test]
-    fn test_extract_network_subnet() {
-        assert_eq!(
-            SubscriptionManager::extract_network_subnet("192.168.1.100"),
-            "192.168.1"
-        );
-        assert_eq!(
-            SubscriptionManager::extract_network_subnet("10.0.0.50"),
-            "10.0.0"
-        );
-        assert_eq!(
-            SubscriptionManager::extract_network_subnet("172.16.5.200"),
-            "172.16.5"
-        );
-        
-        // Test edge cases
-        assert_eq!(
-            SubscriptionManager::extract_network_subnet("192.168"),
-            "192.168"
-        );
-        assert_eq!(
-            SubscriptionManager::extract_network_subnet("invalid"),
-            "invalid"
-        );
-    }
-
-    #[test]
-    fn test_update_speaker_network_mapping() {
-        let manager = create_test_manager();
-        
-        let speaker1 = create_test_speaker("uuid:RINCON_123456789::1", "192.168.1.100", "Living Room");
-        let speaker2 = create_test_speaker("uuid:RINCON_987654321::1", "192.168.1.101", "Kitchen");
-        let speaker3 = create_test_speaker("uuid:RINCON_111222333::1", "10.0.0.50", "Bedroom");
-
-        // Add speakers to different networks
-        manager.update_speaker_network_mapping(&speaker1);
-        manager.update_speaker_network_mapping(&speaker2);
-        manager.update_speaker_network_mapping(&speaker3);
-
-        let speaker_networks = manager.speaker_networks.read().unwrap();
-        
-        // Check that speakers are grouped by network
-        let network_192_168_1 = speaker_networks.get("192.168.1").unwrap();
-        assert_eq!(network_192_168_1.len(), 2);
-        assert!(network_192_168_1.contains(&speaker1.id));
-        assert!(network_192_168_1.contains(&speaker2.id));
-
-        let network_10_0_0 = speaker_networks.get("10.0.0").unwrap();
-        assert_eq!(network_10_0_0.len(), 1);
-        assert!(network_10_0_0.contains(&speaker3.id));
-    }
-
-    #[test]
-    fn test_remove_speaker_from_network_mapping() {
-        let manager = create_test_manager();
-        
-        let speaker1 = create_test_speaker("uuid:RINCON_123456789::1", "192.168.1.100", "Living Room");
-        let speaker2 = create_test_speaker("uuid:RINCON_987654321::1", "192.168.1.101", "Kitchen");
-
-        // Add speakers
-        manager.update_speaker_network_mapping(&speaker1);
-        manager.update_speaker_network_mapping(&speaker2);
-
-        // Verify both speakers are in the network
-        {
-            let speaker_networks = manager.speaker_networks.read().unwrap();
-            let network = speaker_networks.get("192.168.1").unwrap();
-            assert_eq!(network.len(), 2);
-        }
-
-        // Remove one speaker
-        manager.remove_speaker_from_network_mapping(speaker1.id);
-
-        // Verify only one speaker remains
-        {
-            let speaker_networks = manager.speaker_networks.read().unwrap();
-            let network = speaker_networks.get("192.168.1").unwrap();
-            assert_eq!(network.len(), 1);
-            assert!(network.contains(&speaker2.id));
-            assert!(!network.contains(&speaker1.id));
-        }
-
-        // Remove the last speaker
-        manager.remove_speaker_from_network_mapping(speaker2.id);
-
-        // Verify the network is cleaned up
-        {
-            let speaker_networks = manager.speaker_networks.read().unwrap();
-            assert!(!speaker_networks.contains_key("192.168.1"));
-        }
-    }
-
-    #[test]
-    fn test_get_speakers_in_same_network() {
-        let manager = create_test_manager();
-        
-        let speaker1 = create_test_speaker("uuid:RINCON_123456789::1", "192.168.1.100", "Living Room");
-        let speaker2 = create_test_speaker("uuid:RINCON_987654321::1", "192.168.1.101", "Kitchen");
-        let speaker3 = create_test_speaker("uuid:RINCON_111222333::1", "10.0.0.50", "Bedroom");
-
-        // Add speakers to network mapping
-        manager.update_speaker_network_mapping(&speaker1);
-        manager.update_speaker_network_mapping(&speaker2);
-        manager.update_speaker_network_mapping(&speaker3);
-
-        // Test getting speakers in same network
-        let same_network_speakers = manager.get_speakers_in_same_network(&speaker1);
-        assert_eq!(same_network_speakers.len(), 2);
-        assert!(same_network_speakers.contains(&speaker1.id));
-        assert!(same_network_speakers.contains(&speaker2.id));
-        assert!(!same_network_speakers.contains(&speaker3.id));
-
-        let different_network_speakers = manager.get_speakers_in_same_network(&speaker3);
-        assert_eq!(different_network_speakers.len(), 1);
-        assert!(different_network_speakers.contains(&speaker3.id));
-    }
-
-    #[test]
-    fn test_select_representative_speaker() {
-        let manager = create_test_manager();
-        
-        let speaker1 = create_test_speaker("uuid:RINCON_123456789::1", "192.168.1.100", "Living Room");
-        let speaker2 = create_test_speaker("uuid:RINCON_987654321::1", "192.168.1.101", "Kitchen");
-
-        // Add speakers to storage
-        {
-            let mut speakers = manager.speakers.write().unwrap();
-            speakers.insert(speaker1.id, speaker1.clone());
-            speakers.insert(speaker2.id, speaker2.clone());
-        }
-
-        let network_speakers = vec![speaker1.id, speaker2.id];
-        let representative = manager.select_representative_speaker(&network_speakers);
-        
-        // Should select one of the speakers
-        assert!(representative.is_some());
-        let selected_id = representative.unwrap();
-        assert!(selected_id == speaker1.id || selected_id == speaker2.id);
-
-        // Test with empty list
-        let empty_speakers = vec![];
-        let no_representative = manager.select_representative_speaker(&empty_speakers);
-        assert!(no_representative.is_none());
-    }
-
-    #[test]
-    fn test_select_representative_speaker_priority() {
-        let manager = create_test_manager();
-        
-        // Test satellite vs non-satellite preference
-        let mut satellite_speaker = create_test_speaker("uuid:RINCON_987654321::1", "192.168.1.101", "Satellite");
-        satellite_speaker.model_name = "Sonos Satellite".to_string(); // Mark as satellite
-        
-        let regular_speaker = create_test_speaker("uuid:RINCON_444555666::1", "192.168.1.102", "Regular");
-
-        {
-            let mut speakers = manager.speakers.write().unwrap();
-            speakers.insert(satellite_speaker.id, satellite_speaker.clone());
-            speakers.insert(regular_speaker.id, regular_speaker.clone());
-        }
-
-        // Test with satellite and regular speakers - should prefer regular over satellite
-        let network_speakers = vec![satellite_speaker.id, regular_speaker.id];
-        let representative = manager.select_representative_speaker(&network_speakers);
-        
-        assert!(representative.is_some());
-        let selected_id = representative.unwrap();
-        // Should prefer regular speaker over satellite
-        assert_eq!(selected_id, regular_speaker.id);
-
-        // Test that algorithm returns a valid speaker from the list
-        let speaker1 = create_test_speaker("uuid:RINCON_111111111::1", "192.168.1.100", "Speaker1");
-        let speaker2 = create_test_speaker("uuid:RINCON_222222222::1", "192.168.1.101", "Speaker2");
-        
-        {
-            let mut speakers = manager.speakers.write().unwrap();
-            speakers.clear(); // Clear previous speakers
-            speakers.insert(speaker1.id, speaker1.clone());
-            speakers.insert(speaker2.id, speaker2.clone());
-        }
-
-        let network_speakers = vec![speaker1.id, speaker2.id];
-        let representative = manager.select_representative_speaker(&network_speakers);
-        
-        assert!(representative.is_some());
-        let selected_id = representative.unwrap();
-        // Should select one of the available speakers
-        assert!(selected_id == speaker1.id || selected_id == speaker2.id);
-    }
-
-    #[test]
-    fn test_speaker_network_update_on_ip_change() {
-        let manager = create_test_manager();
-        
-        let mut speaker = create_test_speaker("uuid:RINCON_123456789::1", "192.168.1.100", "Living Room");
-
-        // Add speaker to first network
-        manager.update_speaker_network_mapping(&speaker);
-        
-        {
-            let speaker_networks = manager.speaker_networks.read().unwrap();
-            assert!(speaker_networks.get("192.168.1").unwrap().contains(&speaker.id));
-            assert!(!speaker_networks.contains_key("10.0.0"));
-        }
-
-        // Update speaker IP to different network
-        speaker.ip_address = "10.0.0.50".to_string();
-        manager.update_speaker_network_mapping(&speaker);
-
-        {
-            let speaker_networks = manager.speaker_networks.read().unwrap();
-            // Should be removed from old network and added to new network
-            assert!(!speaker_networks.contains_key("192.168.1")); // Old network cleaned up
-            assert!(speaker_networks.get("10.0.0").unwrap().contains(&speaker.id));
-        }
-    }
 }

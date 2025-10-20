@@ -478,12 +478,6 @@ fn test_state_cache_update_patterns() {
             speaker_id: speakers[1].id,
             muted: true,
         },
-        StateChange::GroupTopologyChanged {
-            groups: vec![], // Empty groups for test
-            speakers_joined: vec![],
-            speakers_left: vec![],
-            coordinator_changes: vec![],
-        },
     ];
 
     let builder = EventStreamBuilder::new(speakers)
@@ -507,7 +501,6 @@ fn test_state_cache_update_patterns() {
     // - PlaybackStateChanged -> cache.update_playback_state()
     // - VolumeChanged -> cache.update_volume()
     // - MuteChanged -> cache.update_mute()
-    // - GroupTopologyChanged -> cache.initialize() with new groups
 }
 
 #[test]

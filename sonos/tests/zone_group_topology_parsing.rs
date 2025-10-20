@@ -5,8 +5,8 @@
 //! malformed XML, and event generation for different topology change scenarios.
 
 use sonos::models::{Speaker, SpeakerId, StateChange};
-use sonos::streaming::{ZoneGroupTopologySubscription, SubscriptionConfig, ServiceType};
 use sonos::streaming::subscription::ServiceSubscription;
+use sonos::streaming::{ServiceType, SubscriptionConfig, ZoneGroupTopologySubscription};
 use std::fs;
 
 /// Helper function to create a test speaker
@@ -79,7 +79,10 @@ mod xml_parsing_tests {
 
         assert_eq!(groups.len(), 1);
         let group = &groups[0];
-        assert_eq!(group.coordinator, SpeakerId::from_udn("uuid:RINCON_123456789"));
+        assert_eq!(
+            group.coordinator,
+            SpeakerId::from_udn("uuid:RINCON_123456789")
+        );
         assert_eq!(group.member_count(), 1);
         assert!(group.is_member(SpeakerId::from_udn("uuid:RINCON_123456789")));
     }
@@ -96,14 +99,20 @@ mod xml_parsing_tests {
 
         // First group with 2 members
         let group1 = &groups[0];
-        assert_eq!(group1.coordinator, SpeakerId::from_udn("uuid:RINCON_123456789"));
+        assert_eq!(
+            group1.coordinator,
+            SpeakerId::from_udn("uuid:RINCON_123456789")
+        );
         assert_eq!(group1.member_count(), 2);
         assert!(group1.is_member(SpeakerId::from_udn("uuid:RINCON_123456789")));
         assert!(group1.is_member(SpeakerId::from_udn("uuid:RINCON_987654321")));
 
         // Second group with 1 member
         let group2 = &groups[1];
-        assert_eq!(group2.coordinator, SpeakerId::from_udn("uuid:RINCON_111222333"));
+        assert_eq!(
+            group2.coordinator,
+            SpeakerId::from_udn("uuid:RINCON_111222333")
+        );
         assert_eq!(group2.member_count(), 1);
         assert!(group2.is_member(SpeakerId::from_udn("uuid:RINCON_111222333")));
     }
@@ -118,12 +127,19 @@ mod xml_parsing_tests {
 
         assert_eq!(groups.len(), 1);
         let group = &groups[0];
-        assert_eq!(group.coordinator, SpeakerId::from_udn("uuid:RINCON_123456789"));
+        assert_eq!(
+            group.coordinator,
+            SpeakerId::from_udn("uuid:RINCON_123456789")
+        );
         assert_eq!(group.member_count(), 1);
 
         // Check that satellites are included in all_speaker_ids
         let all_ids = group.all_speaker_ids();
-        assert!(all_ids.len() >= 3, "Expected at least 3 speakers (main + 2 satellites), got {}", all_ids.len()); // Main speaker + 2 satellites
+        assert!(
+            all_ids.len() >= 3,
+            "Expected at least 3 speakers (main + 2 satellites), got {}",
+            all_ids.len()
+        ); // Main speaker + 2 satellites
         assert!(all_ids.contains(&SpeakerId::from_udn("uuid:RINCON_123456789")));
         assert!(all_ids.contains(&SpeakerId::from_udn("uuid:RINCON_SAT001")));
         assert!(all_ids.contains(&SpeakerId::from_udn("uuid:RINCON_SAT002")));
@@ -182,7 +198,10 @@ mod error_handling_tests {
 
         let result = subscription.parse_zone_group_state("");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Empty XML content"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Empty XML content"));
     }
 
     #[test]
@@ -279,7 +298,7 @@ mod error_handling_tests {
     #[test]
     fn test_parse_too_many_groups() {
         let subscription = create_test_subscription();
-        
+
         // Create XML with many groups to test the limit
         let mut xml = String::from("<ZoneGroupState><ZoneGroups>");
         for i in 0..150 {
@@ -291,7 +310,7 @@ mod error_handling_tests {
             ));
         }
         xml.push_str("</ZoneGroups></ZoneGroupState>");
-        
+
         let upnp_event = wrap_in_upnp_event(&xml);
 
         let result = subscription.parse_zone_group_state(&upnp_event);
@@ -305,9 +324,11 @@ mod error_handling_tests {
     #[test]
     fn test_parse_too_many_members() {
         let subscription = create_test_subscription();
-        
+
         // Create XML with many members to test the limit
-        let mut xml = String::from(r#"<ZoneGroupState><ZoneGroups><ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1">"#);
+        let mut xml = String::from(
+            r#"<ZoneGroupState><ZoneGroups><ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1">"#,
+        );
         for i in 0..60 {
             xml.push_str(&format!(
                 r#"<ZoneGroupMember UUID="RINCON_{:012}" Location="http://192.168.1.{}:1400/xml/device_description.xml" ZoneName="Room {}" />"#,
@@ -315,7 +336,7 @@ mod error_handling_tests {
             ));
         }
         xml.push_str("</ZoneGroup></ZoneGroups></ZoneGroupState>");
-        
+
         let upnp_event = wrap_in_upnp_event(&xml);
 
         let result = subscription.parse_zone_group_state(&upnp_event);
@@ -345,7 +366,10 @@ mod event_generation_tests {
                 coordinator_id,
                 initial_members,
             } => {
-                assert_eq!(coordinator_id, &SpeakerId::from_udn("uuid:RINCON_123456789"));
+                assert_eq!(
+                    coordinator_id,
+                    &SpeakerId::from_udn("uuid:RINCON_123456789")
+                );
                 assert_eq!(initial_members.len(), 1);
                 assert!(initial_members.contains(&SpeakerId::from_udn("uuid:RINCON_123456789")));
             }
@@ -369,35 +393,6 @@ mod event_generation_tests {
             .filter(|c| matches!(c, StateChange::GroupFormed { .. }))
             .collect();
         assert_eq!(group_formed_events.len(), 2);
-    }
-
-    #[test]
-    fn test_subsequent_same_topology_generates_topology_changed() {
-        let subscription = create_test_subscription();
-        let zone_group_xml = load_fixture("zone_group_topology_single.xml");
-        let upnp_event = wrap_in_upnp_event(&zone_group_xml);
-
-        // First parse - initial topology
-        let _initial_changes = subscription.parse_event(&upnp_event).unwrap();
-
-        // Second parse - same topology
-        let changes = subscription.parse_event(&upnp_event).unwrap();
-
-        assert_eq!(changes.len(), 1);
-        match &changes[0] {
-            StateChange::GroupTopologyChanged {
-                groups,
-                speakers_joined,
-                speakers_left,
-                coordinator_changes,
-            } => {
-                assert_eq!(groups.len(), 1);
-                assert_eq!(speakers_joined.len(), 0);
-                assert_eq!(speakers_left.len(), 0);
-                assert_eq!(coordinator_changes.len(), 0);
-            }
-            _ => panic!("Expected GroupTopologyChanged event, got: {:?}", changes[0]),
-        }
     }
 
     #[test]
@@ -484,7 +479,10 @@ mod attribute_extraction_tests {
         assert_eq!(zone_name, "Living & Dining Room");
 
         let location = subscription.extract_attribute(xml, "Location").unwrap();
-        assert_eq!(location, "http://192.168.1.100:1400/xml/device_description.xml");
+        assert_eq!(
+            location,
+            "http://192.168.1.100:1400/xml/device_description.xml"
+        );
     }
 
     #[test]
@@ -554,7 +552,10 @@ mod xml_entity_decoding_tests {
 
         let encoded = "<![CDATA[<ZoneGroupState><ZoneGroups></ZoneGroups></ZoneGroupState>]]>";
         let decoded = subscription.decode_xml_entities(encoded);
-        assert_eq!(decoded, "<ZoneGroupState><ZoneGroups></ZoneGroups></ZoneGroupState>");
+        assert_eq!(
+            decoded,
+            "<ZoneGroupState><ZoneGroups></ZoneGroups></ZoneGroupState>"
+        );
     }
 
     #[test]
@@ -742,7 +743,8 @@ mod satellite_parsing_tests {
     #[test]
     fn test_parse_member_satellites_single_satellite() {
         let subscription = create_test_subscription();
-        let member_xml = r#"<ZoneGroupMember UUID="RINCON_123456789" Satellites="RINCON_SAT001" />"#;
+        let member_xml =
+            r#"<ZoneGroupMember UUID="RINCON_123456789" Satellites="RINCON_SAT001" />"#;
 
         let satellites = subscription.parse_member_satellites(member_xml).unwrap();
         assert_eq!(satellites.len(), 1);

@@ -53,9 +53,9 @@ impl ServiceType {
     /// Get the subscription scope for this service type
     pub fn subscription_scope(&self) -> SubscriptionScope {
         match self {
-            ServiceType::AVTransport | ServiceType::RenderingControl | ServiceType::ContentDirectory => {
-                SubscriptionScope::PerSpeaker
-            }
+            ServiceType::AVTransport
+            | ServiceType::RenderingControl
+            | ServiceType::ContentDirectory => SubscriptionScope::PerSpeaker,
             ServiceType::ZoneGroupTopology => SubscriptionScope::NetworkWide,
         }
     }
@@ -123,7 +123,11 @@ impl Default for StreamConfig {
             subscription_timeout: Duration::from_secs(1800), // 30 minutes
             retry_attempts: 3,
             retry_backoff: Duration::from_secs(1),
-            enabled_services: vec![ServiceType::AVTransport],
+            enabled_services: vec![
+                ServiceType::AVTransport, 
+                ServiceType::RenderingControl, 
+                ServiceType::ZoneGroupTopology
+            ],
             callback_port_range: (8080, 8090),
         }
     }
@@ -275,7 +279,7 @@ pub struct SubscriptionConfig {
 impl Default for SubscriptionConfig {
     fn default() -> Self {
         Self {
-            timeout_seconds: 1800, // 30 minutes
+            timeout_seconds: 1800,                       // 30 minutes
             renewal_threshold: Duration::from_secs(300), // 5 minutes before expiry
             max_retry_attempts: 3,
             retry_backoff_base: Duration::from_secs(1),
@@ -381,10 +385,10 @@ mod tests {
     fn test_subscription_id() {
         let id1 = SubscriptionId::new();
         let id2 = SubscriptionId::new();
-        
+
         // Different IDs should not be equal
         assert_ne!(id1, id2);
-        
+
         // String conversion should work
         let id_str = id1.as_string();
         let id3 = SubscriptionId::from_string(&id_str).unwrap();
@@ -411,7 +415,8 @@ mod tests {
         assert!(invalid_config.is_err());
 
         // Test invalid timeout
-        let invalid_config = StreamConfig::default().with_subscription_timeout(Duration::from_secs(30));
+        let invalid_config =
+            StreamConfig::default().with_subscription_timeout(Duration::from_secs(30));
         assert!(invalid_config.is_err());
 
         // Test invalid port range
@@ -423,7 +428,7 @@ mod tests {
     fn test_subscription_config_from_stream_config() {
         let stream_config = StreamConfig::default();
         let sub_config = SubscriptionConfig::from_stream_config(&stream_config);
-        
+
         assert_eq!(sub_config.timeout_seconds, 1800);
         assert_eq!(sub_config.max_retry_attempts, 3);
     }
@@ -433,7 +438,7 @@ mod tests {
         let sub_id = SubscriptionId::new();
         let xml = "<event>test</event>".to_string();
         let event = RawEvent::new(sub_id, xml.clone());
-        
+
         assert_eq!(event.subscription_id, sub_id);
         assert_eq!(event.event_xml, xml);
         assert!(event.timestamp <= SystemTime::now());

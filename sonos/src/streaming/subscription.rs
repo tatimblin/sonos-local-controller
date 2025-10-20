@@ -3,7 +3,7 @@ use crate::models::{SpeakerId, StateChange};
 use std::time::SystemTime;
 
 /// Error types for subscription operations
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum SubscriptionError {
     #[error("Failed to establish subscription: {0}")]
     SubscriptionFailed(String),
@@ -42,6 +42,14 @@ pub enum SubscriptionError {
 
     #[error("Timeout occurred during operation: {0}")]
     Timeout(String),
+
+    /// NetworkWide subscription conflicts with PerSpeaker
+    #[error("NetworkWide service {service:?} conflicts with PerSpeaker services: {message}")]
+    ServiceConflict { service: ServiceType, message: String },
+
+    /// Subscription registry corruption
+    #[error("Subscription registry corruption detected: {message}")]
+    RegistryCorruption { message: String },
 }
 
 impl From<reqwest::Error> for SubscriptionError {

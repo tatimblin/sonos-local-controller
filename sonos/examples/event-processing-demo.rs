@@ -88,11 +88,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("   📊 StateCache updated - Speaker volume: {}", speaker_state.volume);
                     }
                 }
-                StateChange::GroupTopologyChanged { groups, speakers_joined, speakers_left, coordinator_changes } => {
-                    println!("   🏠 Zone topology changed:");
-                    println!("      Groups: {}, Joined: {}, Left: {}, Coordinator changes: {}", 
-                             groups.len(), speakers_joined.len(), speakers_left.len(), coordinator_changes.len());
-                }
                 StateChange::SpeakerJoinedGroup { speaker_id, group_id, coordinator_id } => {
                     println!("   ➕ Speaker {:?} joined group {:?} (coordinator: {:?})", speaker_id, group_id, coordinator_id);
                 }
@@ -119,7 +114,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 StateChange::PositionChanged { .. } => "Position Change",
                 StateChange::TrackChanged { .. } => "Track Change",
                 StateChange::TransportInfoChanged { .. } => "Transport Info Change",
-                StateChange::GroupTopologyChanged { .. } => "Group Topology Change",
                 StateChange::SpeakerJoinedGroup { .. } => "Speaker Joined Group",
                 StateChange::SpeakerLeftGroup { .. } => "Speaker Left Group",
                 StateChange::CoordinatorChanged { .. } => "Coordinator Changed",

@@ -151,16 +151,7 @@ pub enum StateChange {
         speaker_id: SpeakerId,
         position_ms: u64,
     },
-    /// Enhanced group topology change with detailed information
-    GroupTopologyChanged {
-        groups: Vec<Group>,
-        /// Speakers that joined groups
-        speakers_joined: Vec<(SpeakerId, GroupId)>,
-        /// Speakers that left groups  
-        speakers_left: Vec<(SpeakerId, Option<GroupId>)>,
-        /// New coordinators assigned (group_id, old_coordinator, new_coordinator)
-        coordinator_changes: Vec<(GroupId, SpeakerId, SpeakerId)>,
-    },
+
     /// Speaker joined a group
     SpeakerJoinedGroup {
         speaker_id: SpeakerId,

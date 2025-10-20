@@ -95,12 +95,15 @@ impl EventStream {
     fn process_state_change_internal(state_cache: &StateCache, event: StateChange) {
         match event {
             StateChange::VolumeChanged { speaker_id, volume } => {
+                log::debug!("🔊 Processing volume change: Speaker {:?} -> {}%", speaker_id, volume);
                 state_cache.update_volume(speaker_id, volume);
             }
             StateChange::MuteChanged { speaker_id, muted } => {
+                log::debug!("🔇 Processing mute change: Speaker {:?} -> {}", speaker_id, if muted { "MUTED" } else { "UNMUTED" });
                 state_cache.update_mute(speaker_id, muted);
             }
             StateChange::PlaybackStateChanged { speaker_id, state } => {
+                log::debug!("▶️ Processing playback state change: Speaker {:?} -> {:?}", speaker_id, state);
                 state_cache.update_playback_state(speaker_id, state);
             }
             StateChange::PositionChanged {
@@ -109,22 +112,7 @@ impl EventStream {
             } => {
                 state_cache.update_position(speaker_id, position_ms);
             }
-            StateChange::GroupTopologyChanged {
-                groups,
-                speakers_joined: _,
-                speakers_left: _,
-                coordinator_changes: _,
-            } => {
-                // For group topology changes, we need to reinitialize the groups
-                // Since StateCache doesn't have a public method to update groups,
-                // we'll need to get the current speakers and reinitialize
-                let current_speakers: Vec<_> = state_cache
-                    .get_all_speakers()
-                    .into_iter()
-                    .map(|s| s.speaker)
-                    .collect();
-                state_cache.initialize(current_speakers, groups);
-            }
+
             StateChange::TrackChanged {
                 speaker_id,
                 track_info,
@@ -265,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_process_group_state_changes() {
-        use crate::models::{Speaker, GroupId};
+        use crate::models::{GroupId, Speaker};
         use crate::state::StateCache;
         use std::sync::Arc;
 

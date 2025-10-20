@@ -25,7 +25,7 @@ impl StateCache {
                 SpeakerState {
                     speaker,
                     playback_state: PlaybackState::Stopped,
-                    volume: 0,
+                    volume: 0, // Note: This is the default until events update it
                     muted: false,
                     position_ms: 0,
                     duration_ms: 0,
@@ -106,6 +106,8 @@ impl StateCache {
     pub fn get_all_groups(&self) -> Vec<Group> {
         self.groups.read().unwrap().values().cloned().collect()
     }
+
+
 
     fn set_groups(&self, groups: Vec<Group>) {
         let mut group_cache = self.groups.write().unwrap();

@@ -33,11 +33,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     state_cache.initialize(speakers.clone(), groups);
 
     // Setup event streaming with new simplified interface
-    // Limit to first 3 speakers to avoid hanging on problematic ones
-    let limited_speakers: Vec<_> = speakers.into_iter().take(3).collect();
-    println!("Using {} speakers for monitoring", limited_speakers.len());
+    println!("Using all {} speakers for monitoring", speakers.len());
     
-    match EventStreamBuilder::new(limited_speakers) {
+    match EventStreamBuilder::new(speakers) {
         Ok(builder) => {
             // Create shared state for tracking events
             let event_count = Arc::new(std::sync::atomic::AtomicU32::new(0));

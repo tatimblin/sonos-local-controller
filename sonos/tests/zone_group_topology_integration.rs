@@ -33,7 +33,6 @@ fn test_zone_group_topology_integration() -> Result<(), Box<dyn std::error::Erro
         .with_services(&[ServiceType::ZoneGroupTopology])
         .with_event_handler(move |event| {
             match event {
-                StateChange::GroupTopologyChanged { .. } |
                 StateChange::SpeakerJoinedGroup { .. } |
                 StateChange::SpeakerLeftGroup { .. } |
                 StateChange::CoordinatorChanged { .. } |

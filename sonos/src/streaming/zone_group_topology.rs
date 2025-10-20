@@ -14,8 +14,6 @@ use std::time::SystemTime;
 pub struct ZoneGroupTopologySubscription {
     /// Representative speaker for this network (used for subscription endpoint)
     representative_speaker: Speaker,
-    /// All speakers in the network (for event distribution)
-    network_speakers: Vec<Speaker>,
     /// Current subscription ID (None if not subscribed)
     subscription_id: Option<SubscriptionId>,
     /// UPnP SID (Subscription ID) returned by the device
@@ -37,18 +35,15 @@ impl ZoneGroupTopologySubscription {
     ///
     /// # Arguments
     /// * `representative_speaker` - The speaker to use for the subscription endpoint
-    /// * `network_speakers` - All speakers in the network for event distribution
     /// * `callback_url` - URL where the device should send event notifications
     /// * `config` - Configuration for this subscription
     pub fn new(
         representative_speaker: Speaker,
-        network_speakers: Vec<Speaker>,
         callback_url: String,
         config: SubscriptionConfig,
     ) -> SubscriptionResult<Self> {
         Ok(Self {
             representative_speaker,
-            network_speakers,
             subscription_id: None,
             upnp_sid: None,
             callback_url,
@@ -57,11 +52,6 @@ impl ZoneGroupTopologySubscription {
             last_renewal: None,
             last_zone_groups: Mutex::new(None),
         })
-    }
-
-    /// Update the list of network speakers
-    pub fn update_network_speakers(&mut self, speakers: Vec<Speaker>) {
-        self.network_speakers = speakers;
     }
 
     /// Get the device URL for the representative speaker
@@ -697,24 +687,54 @@ impl ZoneGroupTopologySubscription {
 
         match &*self.last_zone_groups.lock().unwrap() {
             None => {
-                // First time receiving topology - generate initial events
-                println!("🔍 Initial topology received with {} groups", new_groups.len());
+                // First time receiving topology - store it without generating events
+                // Groups should already be initialized via state_cache.initialize() during discovery
+                // Skip initial GroupFormed events to prevent conflicts with initialization
+                println!("🔍 Initial topology received with {} groups (storing for future change detection)", new_groups.len());
                 
-                // Generate GroupFormed events for all initial groups
-                for group in new_groups {
-                    changes.push(StateChange::GroupFormed {
-                        group_id: group.id,
-                        coordinator_id: group.coordinator,
-                        initial_members: group.all_speaker_ids(),
-                    });
-                }
+                // Store the initial topology for future change detection without generating events
+                // This satisfies requirements 6.1 and 6.2 by ensuring ZoneGroupTopology events
+                // only process actual topology changes, not initial state
             }
             Some(old_groups) => {
                 // Compare old and new states to detect specific changes
                 let (speakers_joined, speakers_left, coordinator_changes) = 
                     self.analyze_topology_changes(old_groups, new_groups);
 
-                // Generate specific change events
+                // Generate events in the correct order: structural changes first, then membership changes
+                
+                // 1. First, detect newly formed groups (must come before SpeakerJoinedGroup)
+                for group in new_groups {
+                    if !old_groups.iter().any(|old_group| old_group.id == group.id) {
+                        changes.push(StateChange::GroupFormed {
+                            group_id: group.id,
+                            coordinator_id: group.coordinator,
+                            initial_members: group.all_speaker_ids(),
+                        });
+                    }
+                }
+
+                // 2. Then, detect dissolved groups (must come before SpeakerLeftGroup)
+                for old_group in old_groups {
+                    if !new_groups.iter().any(|group| group.id == old_group.id) {
+                        changes.push(StateChange::GroupDissolved {
+                            group_id: old_group.id,
+                            former_coordinator: old_group.coordinator,
+                            former_members: old_group.all_speaker_ids(),
+                        });
+                    }
+                }
+
+                // 3. Then, process speaker membership changes (groups now exist)
+                for (speaker_id, former_group_id) in &speakers_left {
+                    if let Some(group_id) = former_group_id {
+                        changes.push(StateChange::SpeakerLeftGroup {
+                            speaker_id: *speaker_id,
+                            former_group_id: *group_id,
+                        });
+                    }
+                }
+
                 for (speaker_id, group_id) in &speakers_joined {
                     let coordinator_id = new_groups
                         .iter()
@@ -729,15 +749,7 @@ impl ZoneGroupTopologySubscription {
                     });
                 }
 
-                for (speaker_id, former_group_id) in &speakers_left {
-                    if let Some(group_id) = former_group_id {
-                        changes.push(StateChange::SpeakerLeftGroup {
-                            speaker_id: *speaker_id,
-                            former_group_id: *group_id,
-                        });
-                    }
-                }
-
+                // 4. Finally, process coordinator changes within existing groups
                 for (group_id, old_coordinator, new_coordinator) in &coordinator_changes {
                     changes.push(StateChange::CoordinatorChanged {
                         group_id: *group_id,
@@ -745,36 +757,6 @@ impl ZoneGroupTopologySubscription {
                         new_coordinator: *new_coordinator,
                     });
                 }
-
-                // Detect newly formed groups
-                for group in new_groups {
-                    if !old_groups.iter().any(|old_group| old_group.id == group.id) {
-                        changes.push(StateChange::GroupFormed {
-                            group_id: group.id,
-                            coordinator_id: group.coordinator,
-                            initial_members: group.all_speaker_ids(),
-                        });
-                    }
-                }
-
-                // Detect dissolved groups
-                for old_group in old_groups {
-                    if !new_groups.iter().any(|group| group.id == old_group.id) {
-                        changes.push(StateChange::GroupDissolved {
-                            group_id: old_group.id,
-                            former_coordinator: old_group.coordinator,
-                            former_members: old_group.all_speaker_ids(),
-                        });
-                    }
-                }
-
-                // Always include the comprehensive topology change event
-                changes.push(StateChange::GroupTopologyChanged {
-                    groups: new_groups.to_vec(),
-                    speakers_joined: speakers_joined.clone(),
-                    speakers_left: speakers_left.clone(),
-                    coordinator_changes: coordinator_changes.clone(),
-                });
             }
         }
 
@@ -833,8 +815,10 @@ impl ZoneGroupTopologySubscription {
         }
 
         // Find speakers that left groups (and didn't join another)
+        // These speakers became solo, they didn't vanish from the network
         for (speaker_id, old_group_id) in &old_speaker_to_group {
             if !new_speaker_to_group.contains_key(speaker_id) {
+                // Speaker left group and became solo (still exists in network)
                 speakers_left.push((*speaker_id, Some(*old_group_id)));
             }
         }
@@ -999,16 +983,11 @@ mod tests {
     #[test]
     fn test_zone_group_topology_subscription_creation() {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let network_speakers = vec![
-            representative_speaker.clone(),
-            create_test_speaker("987654321", "192.168.1.101"),
-        ];
         let callback_url = "http://localhost:8080/callback/test".to_string();
         let config = SubscriptionConfig::default();
 
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker.clone(),
-            network_speakers,
             callback_url.clone(),
             config,
         );
@@ -1029,7 +1008,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1053,7 +1031,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1074,7 +1051,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1093,7 +1069,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1119,7 +1094,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1140,7 +1114,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1150,21 +1123,16 @@ mod tests {
         let groups = vec![Group::new(coordinator_id)];
 
         let changes = subscription.detect_topology_changes(&groups);
-        assert_eq!(changes.len(), 1);
-
-        // Should generate GroupFormed event for initial topology
-        if let StateChange::GroupFormed {
-            group_id: _,
-            coordinator_id: coord_id,
-            initial_members,
-        } = &changes[0]
-        {
-            assert_eq!(*coord_id, coordinator_id);
-            assert_eq!(initial_members.len(), 1);
-            assert!(initial_members.contains(&coordinator_id));
-        } else {
-            panic!("Expected GroupFormed for initial topology, got: {:?}", changes[0]);
-        }
+        
+        // Should NOT generate any events for initial topology to avoid conflicts
+        // with groups already established during discovery (requirements 6.1, 6.2)
+        assert_eq!(changes.len(), 0);
+        
+        // Verify that the topology was stored for future change detection
+        let stored_groups = subscription.last_zone_groups.lock().unwrap();
+        assert!(stored_groups.is_some());
+        assert_eq!(stored_groups.as_ref().unwrap().len(), 1);
+        assert_eq!(stored_groups.as_ref().unwrap()[0].coordinator, coordinator_id);
     }
 
     #[test]
@@ -1172,7 +1140,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1181,62 +1148,36 @@ mod tests {
         let coordinator_id = SpeakerId::from_udn("uuid:RINCON_123456789");
         let initial_groups = vec![Group::new(coordinator_id)];
 
-        // First call - initial topology
-        let _initial_changes = subscription.detect_topology_changes(&initial_groups);
-
-        // Second call - same topology (should generate GroupTopologyChanged with no specific changes)
+        // First call - initial topology (should not generate events)
         let changes = subscription.detect_topology_changes(&initial_groups);
-        assert_eq!(changes.len(), 1);
+        assert_eq!(changes.len(), 0);
 
-        // Should generate GroupTopologyChanged event
-        if let StateChange::GroupTopologyChanged {
-            groups: changed_groups,
-            speakers_joined,
-            speakers_left,
-            coordinator_changes,
-        } = &changes[0]
-        {
-            assert_eq!(changed_groups.len(), 1);
-            assert_eq!(changed_groups[0].coordinator, coordinator_id);
-            assert_eq!(speakers_joined.len(), 0);
-            assert_eq!(speakers_left.len(), 0);
-            assert_eq!(coordinator_changes.len(), 0);
-        } else {
-            panic!("Expected GroupTopologyChanged");
-        }
+        // Second call - topology change (should generate events)
+        let new_coordinator_id = SpeakerId::from_udn("uuid:RINCON_987654321");
+        let mut new_group = Group::new(new_coordinator_id);
+        new_group.add_member(coordinator_id); // Add the original speaker as a member
+        let new_groups = vec![new_group];
+
+        let changes = subscription.detect_topology_changes(&new_groups);
+        
+        // Should generate events for actual topology changes
+        assert!(changes.len() > 0);
+        
+        // Should include GroupFormed for the new group and GroupDissolved for the old one
+        let has_group_formed = changes.iter().any(|change| matches!(change, StateChange::GroupFormed { .. }));
+        let has_group_dissolved = changes.iter().any(|change| matches!(change, StateChange::GroupDissolved { .. }));
+        
+        assert!(has_group_formed, "Should generate GroupFormed event for new group");
+        assert!(has_group_dissolved, "Should generate GroupDissolved event for old group");
     }
 
-    #[test]
-    fn test_update_network_speakers() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let initial_speakers = vec![representative_speaker.clone()];
 
-        let mut subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker.clone(),
-            initial_speakers,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        assert_eq!(subscription.network_speakers.len(), 1);
-
-        let new_speakers = vec![
-            representative_speaker,
-            create_test_speaker("987654321", "192.168.1.101"),
-            create_test_speaker("111222333", "192.168.1.102"),
-        ];
-
-        subscription.update_network_speakers(new_speakers);
-        assert_eq!(subscription.network_speakers.len(), 3);
-    }
 
     #[test]
     fn test_parse_zone_group_state_with_valid_xml() {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1259,7 +1200,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1275,7 +1215,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1293,7 +1232,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1315,7 +1253,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -1335,7 +1272,6 @@ mod tests {
         let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
             representative_speaker,
-            vec![],
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
