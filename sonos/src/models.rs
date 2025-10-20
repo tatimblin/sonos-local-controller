@@ -151,8 +151,44 @@ pub enum StateChange {
         speaker_id: SpeakerId,
         position_ms: u64,
     },
+    /// Enhanced group topology change with detailed information
     GroupTopologyChanged {
         groups: Vec<Group>,
+        /// Speakers that joined groups
+        speakers_joined: Vec<(SpeakerId, GroupId)>,
+        /// Speakers that left groups  
+        speakers_left: Vec<(SpeakerId, Option<GroupId>)>,
+        /// New coordinators assigned (group_id, old_coordinator, new_coordinator)
+        coordinator_changes: Vec<(GroupId, SpeakerId, SpeakerId)>,
+    },
+    /// Speaker joined a group
+    SpeakerJoinedGroup {
+        speaker_id: SpeakerId,
+        group_id: GroupId,
+        coordinator_id: SpeakerId,
+    },
+    /// Speaker left a group
+    SpeakerLeftGroup {
+        speaker_id: SpeakerId,
+        former_group_id: GroupId,
+    },
+    /// Group coordinator changed
+    CoordinatorChanged {
+        group_id: GroupId,
+        old_coordinator: SpeakerId,
+        new_coordinator: SpeakerId,
+    },
+    /// New group was formed
+    GroupFormed {
+        group_id: GroupId,
+        coordinator_id: SpeakerId,
+        initial_members: Vec<SpeakerId>,
+    },
+    /// Group was dissolved
+    GroupDissolved {
+        group_id: GroupId,
+        former_coordinator: SpeakerId,
+        former_members: Vec<SpeakerId>,
     },
     // New streaming-specific variants
     TrackChanged {

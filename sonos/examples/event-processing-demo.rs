@@ -1,32 +1,41 @@
 use sonos::streaming::{EventStreamBuilder, LifecycleHandlers, ServiceType};
 use sonos::state::StateCache;
-use sonos::models::{Speaker, SpeakerId, StateChange, PlaybackState};
+use sonos::models::{StateChange};
+use sonos::transport::discovery;
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🎵 Event Processing System Demo");
+    println!("🎵 Event Processing System Demo with Real Speakers");
     println!("This demo shows the unified event processing system with:");
     println!("- Automatic StateCache updates");
     println!("- Multiple user event handlers");
     println!("- Lifecycle event callbacks");
     println!("- Error mapping and detection");
+    println!("- ZoneGroupTopology network-wide service integration");
     
-    // Create a test speaker
-    let test_speaker = Speaker {
-        id: SpeakerId::from_udn("uuid:RINCON_DEMO123456::1"),
-        udn: "uuid:RINCON_DEMO123456::1".to_string(),
-        name: "Demo Speaker".to_string(),
-        room_name: "Demo Room".to_string(),
-        ip_address: "192.168.1.100".to_string(),
-        port: 1400,
-        model_name: "Demo Model".to_string(),
-        satellites: vec![],
-    };
+    // Discover real Sonos speakers
+    println!("\n🔍 Discovering Sonos speakers on the network...");
+    let speakers = discovery::discover_speakers_with_timeout(Duration::from_secs(1))?;
+    
+    if speakers.is_empty() {
+        println!("❌ No Sonos speakers found on the network!");
+        println!("   Make sure you have Sonos speakers connected to the same network.");
+        return Ok(());
+    }
+    
+    println!("✅ Found {} speaker(s):", speakers.len());
+    for speaker in &speakers {
+        println!("  - {} ({}) at {} in room '{}'", 
+                 speaker.name, 
+                 speaker.model_name, 
+                 speaker.ip_address,
+                 speaker.room_name);
+    }
     
     // Create StateCache for automatic updates
     let state_cache = Arc::new(StateCache::new());
-    state_cache.initialize(vec![test_speaker.clone()], vec![]);
+    state_cache.initialize(speakers.clone(), vec![]);
     
     // Event counters for demonstration
     let event_counter = Arc::new(AtomicUsize::new(0));
@@ -60,24 +69,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n📡 Creating EventStream with multiple handlers...");
     
     // Create EventStream with the new unified event processing system
-    let _stream = EventStreamBuilder::new(vec![test_speaker])?
+    let _stream = EventStreamBuilder::new(speakers)?
         .with_state_cache(state_cache.clone())
-        .with_services(&[ServiceType::AVTransport, ServiceType::RenderingControl])
+        .with_services(&[ServiceType::AVTransport, ServiceType::RenderingControl, ServiceType::ZoneGroupTopology])
         .with_event_handler(move |event| {
             let count = event_counter_clone.fetch_add(1, Ordering::SeqCst) + 1;
             println!("📨 Event #{}: {:?}", count, event);
             
             // Demonstrate StateCache integration
             match event {
-                StateChange::PlaybackStateChanged { speaker_id, state } => {
+                StateChange::PlaybackStateChanged { speaker_id, state: _ } => {
                     if let Some(speaker_state) = state_cache_clone.get_speaker(speaker_id) {
                         println!("   📊 StateCache updated - Speaker playback state: {:?}", speaker_state.playback_state);
                     }
                 }
-                StateChange::VolumeChanged { speaker_id, volume } => {
+                StateChange::VolumeChanged { speaker_id, volume: _ } => {
                     if let Some(speaker_state) = state_cache_clone.get_speaker(speaker_id) {
                         println!("   📊 StateCache updated - Speaker volume: {}", speaker_state.volume);
                     }
+                }
+                StateChange::GroupTopologyChanged { groups, speakers_joined, speakers_left, coordinator_changes } => {
+                    println!("   🏠 Zone topology changed:");
+                    println!("      Groups: {}, Joined: {}, Left: {}, Coordinator changes: {}", 
+                             groups.len(), speakers_joined.len(), speakers_left.len(), coordinator_changes.len());
+                }
+                StateChange::SpeakerJoinedGroup { speaker_id, group_id, coordinator_id } => {
+                    println!("   ➕ Speaker {:?} joined group {:?} (coordinator: {:?})", speaker_id, group_id, coordinator_id);
+                }
+                StateChange::SpeakerLeftGroup { speaker_id, former_group_id } => {
+                    println!("   ➖ Speaker {:?} left group {:?}", speaker_id, former_group_id);
+                }
+                StateChange::GroupFormed { group_id, coordinator_id, initial_members } => {
+                    println!("   🆕 New group {:?} formed with coordinator {:?} and {} members", 
+                             group_id, coordinator_id, initial_members.len());
+                }
+                StateChange::GroupDissolved { group_id, former_coordinator, former_members } => {
+                    println!("   💥 Group {:?} dissolved (was coordinated by {:?}, had {} members)", 
+                             group_id, former_coordinator, former_members.len());
                 }
                 _ => {}
             }
@@ -92,6 +120,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 StateChange::TrackChanged { .. } => "Track Change",
                 StateChange::TransportInfoChanged { .. } => "Transport Info Change",
                 StateChange::GroupTopologyChanged { .. } => "Group Topology Change",
+                StateChange::SpeakerJoinedGroup { .. } => "Speaker Joined Group",
+                StateChange::SpeakerLeftGroup { .. } => "Speaker Left Group",
+                StateChange::CoordinatorChanged { .. } => "Coordinator Changed",
+                StateChange::GroupFormed { .. } => "Group Formed",
+                StateChange::GroupDissolved { .. } => "Group Dissolved",
                 StateChange::SubscriptionError { .. } => "Subscription Error",
             });
         })
@@ -107,11 +140,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("✅ EventStream created successfully!");
             println!("📊 Stream stats: {:?}", stream.stats());
             
-            println!("\n⏳ Waiting for events (this demo will timeout since no real speakers are available)...");
-            println!("   In a real scenario, events would be received from Sonos speakers");
+            println!("\n⏳ Listening for events from real Sonos speakers...");
+            println!("   Try playing/pausing music, changing volume, or switching tracks on your Sonos speakers");
+            println!("   Press Ctrl+C to stop or wait 30 seconds for automatic shutdown");
             
-            // Wait a bit to see if any events come through
-            std::thread::sleep(Duration::from_secs(2));
+            // Wait for events from real speakers
+            std::thread::sleep(Duration::from_secs(30));
             
             println!("\n📈 Final Statistics:");
             println!("   Total events processed: {}", event_counter.load(Ordering::SeqCst));
@@ -124,7 +158,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => {
             println!("❌ Failed to create EventStream: {:?}", e);
-            println!("   This is expected in demo mode without real Sonos speakers");
+            println!("   This could happen if speakers become unavailable or network issues occur");
             println!("   The error demonstrates the error mapping system:");
             
             // Show how errors are mapped to user-friendly messages

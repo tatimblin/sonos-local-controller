@@ -1,4 +1,4 @@
-use super::types::{ServiceType, SubscriptionConfig, SubscriptionId};
+use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use crate::models::{SpeakerId, StateChange};
 use std::time::SystemTime;
 
@@ -71,6 +71,11 @@ pub type SubscriptionResult<T> = Result<T, SubscriptionError>;
 pub trait ServiceSubscription: Send + Sync {
     /// Get the service type this subscription handles
     fn service_type(&self) -> ServiceType;
+
+    /// Indicates if this service requires per-speaker subscriptions or network-wide subscriptions
+    fn subscription_scope(&self) -> SubscriptionScope {
+        SubscriptionScope::PerSpeaker // Default for backward compatibility
+    }
 
     /// Get the speaker ID this subscription is associated with
     fn speaker_id(&self) -> SpeakerId;
@@ -198,6 +203,10 @@ mod tests {
     impl ServiceSubscription for MockSubscription {
         fn service_type(&self) -> ServiceType {
             self.service_type
+        }
+
+        fn subscription_scope(&self) -> SubscriptionScope {
+            SubscriptionScope::PerSpeaker
         }
 
         fn speaker_id(&self) -> SpeakerId {

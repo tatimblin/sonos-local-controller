@@ -33,24 +33,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     state_cache.initialize(speakers.clone(), groups);
 
     // Setup event streaming with new simplified interface
-    match EventStreamBuilder::new(speakers) {
+    // Limit to first 3 speakers to avoid hanging on problematic ones
+    let limited_speakers: Vec<_> = speakers.into_iter().take(3).collect();
+    println!("Using {} speakers for monitoring", limited_speakers.len());
+    
+    match EventStreamBuilder::new(limited_speakers) {
         Ok(builder) => {
             // Create shared state for tracking events
             let event_count = Arc::new(std::sync::atomic::AtomicU32::new(0));
             let start_time = std::time::Instant::now();
 
-            let state_cache_for_handler = state_cache.clone();
+            // Remove unused variable
             let event_count_for_handler = event_count.clone();
 
+            println!("🚀 Starting event stream builder...");
             match builder
                 .with_state_cache(state_cache.clone())
                 .with_event_handler(move |_event| {
-                    // Increment event count and trigger display update
-                    let count = event_count_for_handler
+                    // Just increment event count - avoid blocking I/O in event handler
+                    let _count = event_count_for_handler
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                         + 1;
-                    let _ =
-                        display_topology_with_stats(&state_cache_for_handler, count, start_time);
+                    // Note: Display updates will be handled by the main loop
                 })
                 .start()
             {
@@ -63,9 +67,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("⏳ Waiting for topology changes...");
                     println!("   Try playing/pausing music or grouping speakers\n");
 
-                    // Keep the stream alive - no manual event processing needed!
+                    // Keep the stream alive and periodically update display
                     loop {
                         std::thread::sleep(Duration::from_secs(1));
+                        
+                        // Update display every second with current event count
+                        let current_count = event_count.load(std::sync::atomic::Ordering::Relaxed);
+                        let _ = display_topology_with_stats(&state_cache, current_count, start_time);
                     }
                 }
                 Err(e) => {

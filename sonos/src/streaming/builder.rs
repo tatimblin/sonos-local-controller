@@ -1,6 +1,6 @@
-use super::interface::{StreamError, LifecycleHandlers, StreamStats, ConfigOverrides};
-use super::types::{ServiceType, StreamConfig};
+use super::interface::{ConfigOverrides, LifecycleHandlers, StreamError, StreamStats};
 use super::manager::SubscriptionManager;
+use super::types::{ServiceType, StreamConfig};
 use crate::models::{Speaker, SpeakerId, StateChange};
 use crate::state::StateCache;
 use std::sync::{mpsc, Arc};
@@ -85,7 +85,11 @@ impl EventStreamBuilder {
 
         Ok(Self {
             speakers,
-            services: vec![ServiceType::AVTransport, ServiceType::RenderingControl], // Default to basic playback events
+            services: vec![
+                ServiceType::AVTransport,
+                ServiceType::RenderingControl,
+                ServiceType::ZoneGroupTopology,
+            ], // Default to basic playback events
             state_cache: None,
             event_handlers: Vec::new(),
             lifecycle_handlers: LifecycleHandlers::default(),
@@ -276,7 +280,11 @@ impl EventStreamBuilder {
     ///     );
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn with_timeouts(mut self, subscription_timeout: Duration, retry_timeout: Duration) -> Self {
+    pub fn with_timeouts(
+        mut self,
+        subscription_timeout: Duration,
+        retry_timeout: Duration,
+    ) -> Self {
         self.config_overrides.subscription_timeout = Some(subscription_timeout);
         self.config_overrides.retry_backoff = Some(retry_timeout);
         self
@@ -348,19 +356,19 @@ impl EventStreamBuilder {
         // Create SubscriptionManager using existing implementation
         println!("🚀 Creating subscription manager...");
         println!("   Enabled services: {:?}", config.enabled_services);
-        let subscription_manager = Arc::new(
-            SubscriptionManager::new(config, sender)
-                .map_err(StreamError::from)?
-        );
+        let subscription_manager =
+            Arc::new(SubscriptionManager::new(config, sender).map_err(StreamError::from)?);
         println!("✅ Subscription manager created successfully");
 
         // Add all speakers to subscription manager using existing add_speaker() method
         let total_speakers = self.speakers.len();
         let mut successful_speakers = 0;
         for speaker in self.speakers {
-            println!("🔗 Setting up subscriptions for speaker: {} ({}:{})", 
-                speaker.name, speaker.ip_address, speaker.port);
-            
+            println!(
+                "🔗 Setting up subscriptions for speaker: {} ({}:{})",
+                speaker.name, speaker.ip_address, speaker.port
+            );
+
             match subscription_manager.add_speaker(speaker.clone()) {
                 Ok(()) => {
                     println!("✅ Successfully set up subscriptions for {}", speaker.name);
@@ -371,21 +379,26 @@ impl EventStreamBuilder {
                     // Don't count as failure - satellite speakers are expected to be skipped
                 }
                 Err(e) => {
-                    println!("⚠️  Failed to create subscriptions for {}: {:?}", speaker.name, e);
+                    println!(
+                        "⚠️  Failed to create subscriptions for {}: {:?}",
+                        speaker.name, e
+                    );
                     println!("   Continuing with other speakers...");
                     // Continue with other speakers instead of failing completely
                 }
             }
         }
-        
+
         if successful_speakers == 0 {
             return Err(StreamError::InitializationFailed(
-                "No speakers could be subscribed to".to_string()
+                "No speakers could be subscribed to".to_string(),
             ));
         }
-        
-        println!("🎯 Successfully set up subscriptions for {}/{} speakers", 
-            successful_speakers, total_speakers);
+
+        println!(
+            "🎯 Successfully set up subscriptions for {}/{} speakers",
+            successful_speakers, total_speakers
+        );
 
         // Show callback server info for debugging
         if let Some(port) = subscription_manager.callback_server_port() {
@@ -412,8 +425,7 @@ impl EventStreamBuilder {
     /// This method creates a StreamConfig using the existing configuration logic
     /// while applying any configuration overrides that were specified.
     fn build_stream_config(&self) -> Result<StreamConfig, StreamError> {
-        let mut config = StreamConfig::default()
-            .with_enabled_services(self.services.clone());
+        let mut config = StreamConfig::default().with_enabled_services(self.services.clone());
 
         // Apply configuration overrides
         if let Some(timeout) = self.config_overrides.subscription_timeout {
@@ -445,9 +457,7 @@ impl EventStreamBuilder {
         }
 
         // Validate the final configuration
-        config
-            .validate()
-            .map_err(StreamError::ConfigurationError)?;
+        config.validate().map_err(StreamError::ConfigurationError)?;
 
         Ok(config)
     }
@@ -500,7 +510,7 @@ impl ActiveEventStream {
     ///
     /// This loop continuously processes events from the receiver, updates the StateCache
     /// if provided, calls user event handlers, and handles lifecycle events.
-    /// 
+    ///
     /// The loop uses existing EventStream::process_state_change logic for StateCache updates
     /// and handles shutdown signals gracefully to terminate event processing.
     fn event_processing_loop(
@@ -511,7 +521,7 @@ impl ActiveEventStream {
         lifecycle_handlers: LifecycleHandlers,
     ) {
         log::debug!("Event processing loop started");
-        
+
         // Call stream started handler
         if let Some(ref handler) = lifecycle_handlers.on_stream_started {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -542,16 +552,24 @@ impl ActiveEventStream {
                     // Call user event handlers in registration order
                     // Support multiple event handlers called in registration order as per requirements
                     for (index, handler) in event_handlers.iter().enumerate() {
-                        log::debug!("Calling event handler #{} for event #{}", index + 1, events_processed);
-                        
+                        log::debug!(
+                            "Calling event handler #{} for event #{}",
+                            index + 1,
+                            events_processed
+                        );
+
                         // Call the handler - we use std::panic::catch_unwind to prevent
                         // a panicking handler from crashing the entire event processing loop
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             handler(state_change.clone());
                         }));
-                        
+
                         if let Err(_) = result {
-                            log::error!("Event handler #{} panicked while processing event #{}", index + 1, events_processed);
+                            log::error!(
+                                "Event handler #{} panicked while processing event #{}",
+                                index + 1,
+                                events_processed
+                            );
                             // Continue with other handlers even if one panics
                         }
                     }
@@ -575,7 +593,10 @@ impl ActiveEventStream {
             }
         }
 
-        log::debug!("Event processing loop terminated after processing {} events", events_processed);
+        log::debug!(
+            "Event processing loop terminated after processing {} events",
+            events_processed
+        );
 
         // Call stream stopped handler
         if let Some(ref handler) = lifecycle_handlers.on_stream_stopped {
@@ -588,22 +609,28 @@ impl ActiveEventStream {
         }
     }
 
-
-
     /// Handle lifecycle events by calling appropriate callbacks
-    /// 
+    ///
     /// This method detects connection, disconnection, and error events from subscription
     /// state changes and triggers the appropriate lifecycle callbacks. It maps internal
     /// SubscriptionError types to simplified StreamError types with actionable messages.
     fn handle_lifecycle_event(event: &StateChange, handlers: &LifecycleHandlers) {
         match event {
-            StateChange::SubscriptionError { speaker_id, error, service } => {
-                log::debug!("Handling subscription error for speaker {:?} on service {:?}: {}", 
-                    speaker_id, service, error);
-                
+            StateChange::SubscriptionError {
+                speaker_id,
+                error,
+                service,
+            } => {
+                log::debug!(
+                    "Handling subscription error for speaker {:?} on service {:?}: {}",
+                    speaker_id,
+                    service,
+                    error
+                );
+
                 // Map internal subscription errors to user-friendly StreamError types
                 let stream_error = Self::map_subscription_error_to_stream_error(error, *service);
-                
+
                 // Call error handler with mapped StreamError
                 if let Some(ref handler) = handlers.on_error {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -613,12 +640,15 @@ impl ActiveEventStream {
                         log::error!("Error handler panicked while processing subscription error");
                     }
                 }
-                
+
                 // Detect disconnection events based on error type
                 let is_disconnection_error = Self::is_disconnection_error(error);
                 if is_disconnection_error {
-                    log::debug!("Subscription error indicates speaker disconnection: {}", error);
-                    
+                    log::debug!(
+                        "Subscription error indicates speaker disconnection: {}",
+                        error
+                    );
+
                     // Call speaker disconnected handler for connection-related failures
                     if let Some(ref handler) = handlers.on_speaker_disconnected {
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -630,59 +660,91 @@ impl ActiveEventStream {
                     }
                 }
             }
-            
-            StateChange::TransportInfoChanged { speaker_id, transport_status, .. } => {
+
+            StateChange::TransportInfoChanged {
+                speaker_id,
+                transport_status,
+                ..
+            } => {
                 // Transport status can indicate connection issues
                 match transport_status {
                     crate::models::TransportStatus::ErrorOccurred => {
                         log::debug!("Transport error occurred for speaker {:?}", speaker_id);
-                        
+
                         if let Some(ref handler) = handlers.on_error {
                             let stream_error = StreamError::SpeakerOperationFailed(
-                                "Transport error occurred on speaker".to_string()
+                                "Transport error occurred on speaker".to_string(),
                             );
-                            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                handler(stream_error);
-                            }));
+                            let result =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    handler(stream_error);
+                                }));
                             if let Err(_) = result {
-                                log::error!("Error handler panicked while processing transport error");
+                                log::error!(
+                                    "Error handler panicked while processing transport error"
+                                );
                             }
                         }
                     }
                     crate::models::TransportStatus::Ok => {
                         // Transport OK indicates successful communication
-                        log::debug!("Transport OK for speaker {:?}, indicating connectivity", speaker_id);
+                        log::debug!(
+                            "Transport OK for speaker {:?}, indicating connectivity",
+                            speaker_id
+                        );
                     }
                 }
             }
-            
+
             // For other events, we can detect implicit connection patterns
-            StateChange::PlaybackStateChanged { speaker_id, .. } |
-            StateChange::VolumeChanged { speaker_id, .. } |
-            StateChange::MuteChanged { speaker_id, .. } |
-            StateChange::PositionChanged { speaker_id, .. } |
-            StateChange::TrackChanged { speaker_id, .. } => {
+            StateChange::PlaybackStateChanged { speaker_id, .. }
+            | StateChange::VolumeChanged { speaker_id, .. }
+            | StateChange::MuteChanged { speaker_id, .. }
+            | StateChange::PositionChanged { speaker_id, .. }
+            | StateChange::TrackChanged { speaker_id, .. } => {
                 // These events indicate the speaker is connected and responding
-                log::debug!("Received successful event from speaker {:?}, indicating connectivity", speaker_id);
-                
+                log::debug!(
+                    "Received successful event from speaker {:?}, indicating connectivity",
+                    speaker_id
+                );
+
                 // Note: We don't call on_speaker_connected for every event as that would be too noisy.
                 // In a future enhancement, we could track connection state and only call it
                 // when a speaker transitions from disconnected to connected state.
             }
-            
-            StateChange::GroupTopologyChanged { groups: _ } => {
+
+            StateChange::GroupTopologyChanged {
+                groups: _,
+                speakers_joined: _,
+                speakers_left: _,
+                coordinator_changes: _,
+            } => {
                 // Group topology changes indicate successful communication with the network
                 log::debug!("Group topology updated, indicating network connectivity");
-                
+
                 // This could trigger a general connectivity confirmation in the future
+            }
+            StateChange::SpeakerJoinedGroup { speaker_id, .. }
+            | StateChange::SpeakerLeftGroup { speaker_id, .. } => {
+                // Individual group membership changes indicate speaker connectivity
+                log::debug!(
+                    "Speaker {:?} group membership changed, indicating connectivity",
+                    speaker_id
+                );
+            }
+            StateChange::CoordinatorChanged { .. }
+            | StateChange::GroupFormed { .. }
+            | StateChange::GroupDissolved { .. } => {
+                // Group structure changes indicate network-wide connectivity
+                log::debug!("Group structure changed, indicating network connectivity");
             }
         }
     }
-    
+
     /// Map subscription error strings to user-friendly StreamError types with actionable messages
     fn map_subscription_error_to_stream_error(error: &str, service: ServiceType) -> StreamError {
         let error_lower = error.to_lowercase();
-        
+
         if error_lower.contains("timeout") || error_lower.contains("timed out") {
             StreamError::NetworkError(format!(
                 "Subscription to {:?} service timed out. Check network connectivity and speaker availability.", 
@@ -695,46 +757,46 @@ impl ActiveEventStream {
             ))
         } else if error_lower.contains("network") || error_lower.contains("unreachable") {
             StreamError::NetworkError(format!(
-                "Network error accessing {:?} service: {}. Check network connectivity.", 
+                "Network error accessing {:?} service: {}. Check network connectivity.",
                 service, error
             ))
         } else if error_lower.contains("parse") || error_lower.contains("invalid") {
             StreamError::SubscriptionError(format!(
-                "Invalid response from {:?} service: {}. Speaker may have compatibility issues.", 
+                "Invalid response from {:?} service: {}. Speaker may have compatibility issues.",
                 service, error
             ))
         } else if error_lower.contains("unauthorized") || error_lower.contains("forbidden") {
             StreamError::SubscriptionError(format!(
-                "Access denied to {:?} service. Speaker may require authentication.", 
+                "Access denied to {:?} service. Speaker may require authentication.",
                 service
             ))
         } else if error_lower.contains("not found") || error_lower.contains("404") {
             StreamError::SpeakerOperationFailed(format!(
-                "Service {:?} not found on speaker. Speaker may not support this service.", 
+                "Service {:?} not found on speaker. Speaker may not support this service.",
                 service
             ))
         } else {
             // Generic error mapping
             StreamError::SpeakerOperationFailed(format!(
-                "Subscription error for {:?} service: {}", 
+                "Subscription error for {:?} service: {}",
                 service, error
             ))
         }
     }
-    
+
     /// Determine if an error string indicates a speaker disconnection
     fn is_disconnection_error(error: &str) -> bool {
         let error_lower = error.to_lowercase();
-        
-        error_lower.contains("timeout") ||
-        error_lower.contains("timed out") ||
-        error_lower.contains("connection refused") ||
-        error_lower.contains("unreachable") ||
-        error_lower.contains("network") ||
-        error_lower.contains("disconnected") ||
-        error_lower.contains("connection reset") ||
-        error_lower.contains("connection lost") ||
-        error_lower.contains("no route to host")
+
+        error_lower.contains("timeout")
+            || error_lower.contains("timed out")
+            || error_lower.contains("connection refused")
+            || error_lower.contains("unreachable")
+            || error_lower.contains("network")
+            || error_lower.contains("disconnected")
+            || error_lower.contains("connection reset")
+            || error_lower.contains("connection lost")
+            || error_lower.contains("no route to host")
     }
     /// Add a speaker to the active stream
     ///
@@ -813,7 +875,7 @@ impl ActiveEventStream {
     /// # use sonos::streaming::ActiveEventStream;
     /// # let stream: ActiveEventStream = todo!();
     /// let stats = stream.stats();
-    /// println!("Monitoring {} speakers with {} subscriptions", 
+    /// println!("Monitoring {} speakers with {} subscriptions",
     ///     stats.active_speakers, stats.active_subscriptions);
     /// ```
     pub fn stats(&self) -> StreamStats {
@@ -849,19 +911,17 @@ impl ActiveEventStream {
     pub fn shutdown(mut self) -> Result<(), StreamError> {
         // Send shutdown signal to event processing thread
         let _ = self.shutdown_sender.send(());
-        
+
         // Wait for the event processor thread to complete gracefully
         if let Some(handle) = self._event_processor.take() {
-            handle
-                .join()
-                .map_err(|_| StreamError::ShutdownFailed)?;
+            handle.join().map_err(|_| StreamError::ShutdownFailed)?;
         }
-        
+
         // Note: SubscriptionManager cleanup is handled automatically when it's dropped
         // The Arc<SubscriptionManager> will be dropped when this ActiveEventStream is dropped,
         // and if it's the last reference, the SubscriptionManager's Drop implementation
         // will handle unsubscribing from all services and cleaning up resources
-        
+
         Ok(())
     }
 }
@@ -871,14 +931,14 @@ impl Drop for ActiveEventStream {
     fn drop(&mut self) {
         // Send shutdown signal (ignore errors since we're dropping)
         let _ = self.shutdown_sender.send(());
-        
+
         // Try to join the thread if it's still available
         if let Some(handle) = self._event_processor.take() {
             // In Drop, we can't wait indefinitely, but we'll give the thread
             // a reasonable amount of time to shut down gracefully
             let _ = handle.join();
         }
-        
+
         // Note: SubscriptionManager cleanup is handled automatically when the Arc is dropped.
         // If this is the last reference to the SubscriptionManager, its Drop implementation
         // will handle unsubscribing from all services and cleaning up the callback server.
@@ -905,7 +965,10 @@ mod tests {
 
     #[test]
     fn test_builder_new() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
         let builder = EventStreamBuilder::new(speakers).unwrap();
 
         assert_eq!(builder.speakers.len(), 1);
@@ -918,7 +981,7 @@ mod tests {
     fn test_builder_new_empty_speakers() {
         let speakers = vec![];
         let result = EventStreamBuilder::new(speakers);
-        
+
         assert!(result.is_err());
         match result.unwrap_err() {
             StreamError::ConfigurationError(msg) => {
@@ -930,9 +993,12 @@ mod tests {
 
     #[test]
     fn test_builder_with_state_cache() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
         let state_cache = Arc::new(StateCache::new());
-        
+
         let builder = EventStreamBuilder::new(speakers)
             .unwrap()
             .with_state_cache(state_cache.clone());
@@ -943,9 +1009,12 @@ mod tests {
 
     #[test]
     fn test_builder_with_services() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
         let services = &[ServiceType::AVTransport, ServiceType::RenderingControl];
-        
+
         let builder = EventStreamBuilder::new(speakers)
             .unwrap()
             .with_services(services);
@@ -955,8 +1024,11 @@ mod tests {
 
     #[test]
     fn test_builder_with_services_empty() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
-        
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
+
         let builder = EventStreamBuilder::new(speakers)
             .unwrap()
             .with_services(&[]);
@@ -967,8 +1039,11 @@ mod tests {
 
     #[test]
     fn test_builder_with_event_handler() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
-        
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
+
         let builder = EventStreamBuilder::new(speakers)
             .unwrap()
             .with_event_handler(|_event| {
@@ -983,11 +1058,14 @@ mod tests {
 
     #[test]
     fn test_build_stream_config_default() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
         let builder = EventStreamBuilder::new(speakers).unwrap();
-        
+
         let config = builder.build_stream_config().unwrap();
-        
+
         assert_eq!(config.enabled_services, vec![ServiceType::AVTransport]);
         assert_eq!(config.buffer_size, 1000); // Default value
         assert_eq!(config.subscription_timeout, Duration::from_secs(1800)); // Default value
@@ -995,17 +1073,20 @@ mod tests {
 
     #[test]
     fn test_build_stream_config_with_overrides() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
         let mut builder = EventStreamBuilder::new(speakers).unwrap();
-        
+
         // Set some configuration overrides
         builder.config_overrides = ConfigOverrides::new()
             .with_subscription_timeout(Duration::from_secs(3600))
             .with_buffer_size(2000)
             .with_callback_port_range(9000, 9010);
-        
+
         let config = builder.build_stream_config().unwrap();
-        
+
         assert_eq!(config.subscription_timeout, Duration::from_secs(3600));
         assert_eq!(config.buffer_size, 2000);
         assert_eq!(config.callback_port_range, (9000, 9010));
@@ -1013,25 +1094,31 @@ mod tests {
 
     #[test]
     fn test_build_stream_config_invalid_overrides() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
         let mut builder = EventStreamBuilder::new(speakers).unwrap();
-        
+
         // Set invalid configuration overrides
-        builder.config_overrides = ConfigOverrides::new()
-            .with_subscription_timeout(Duration::from_secs(30)); // Too short
-        
+        builder.config_overrides =
+            ConfigOverrides::new().with_subscription_timeout(Duration::from_secs(30)); // Too short
+
         let result = builder.build_stream_config();
         assert!(result.is_err());
     }
 
     #[test]
     fn test_builder_with_lifecycle_handlers() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
-        
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
+
         let lifecycle_handlers = LifecycleHandlers::new()
             .with_speaker_connected(|_id| {})
             .with_error(|_error| {});
-        
+
         let _builder = EventStreamBuilder::new(speakers)
             .unwrap()
             .with_lifecycle_handlers(lifecycle_handlers);
@@ -1042,36 +1129,52 @@ mod tests {
 
     #[test]
     fn test_builder_with_timeouts() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
-        
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
+
         let builder = EventStreamBuilder::new(speakers)
             .unwrap()
             .with_timeouts(Duration::from_secs(3600), Duration::from_secs(2));
 
-        assert_eq!(builder.config_overrides.subscription_timeout, Some(Duration::from_secs(3600)));
-        assert_eq!(builder.config_overrides.retry_backoff, Some(Duration::from_secs(2)));
+        assert_eq!(
+            builder.config_overrides.subscription_timeout,
+            Some(Duration::from_secs(3600))
+        );
+        assert_eq!(
+            builder.config_overrides.retry_backoff,
+            Some(Duration::from_secs(2))
+        );
     }
 
     #[test]
     fn test_builder_with_callback_ports() {
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
-        
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
+
         let builder = EventStreamBuilder::new(speakers)
             .unwrap()
             .with_callback_ports(9000, 9010);
 
-        assert_eq!(builder.config_overrides.callback_port_range, Some((9000, 9010)));
+        assert_eq!(
+            builder.config_overrides.callback_port_range,
+            Some((9000, 9010))
+        );
     }
 
     #[test]
     fn test_builder_start() {
         // Note: This test may fail in environments without network access
         // or where the callback server can't bind to ports
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
-        
-        let result = EventStreamBuilder::new(speakers)
-            .unwrap()
-            .start();
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
+
+        let result = EventStreamBuilder::new(speakers).unwrap().start();
 
         // The test might fail due to network issues, but we can at least verify
         // that the method exists and returns the correct type
@@ -1092,13 +1195,16 @@ mod tests {
         // Test that stats method returns proper structure
         // Note: This is a unit test for the stats method structure,
         // not an integration test with actual speakers
-        let speakers = vec![create_test_speaker("uuid:RINCON_123456789::1", "Test Speaker")];
+        let speakers = vec![create_test_speaker(
+            "uuid:RINCON_123456789::1",
+            "Test Speaker",
+        )];
         let _builder = EventStreamBuilder::new(speakers).unwrap();
-        
+
         // We can't easily create a real ActiveEventStream in tests due to network dependencies,
         // but we can test the stats structure by creating a mock scenario
         let stats = StreamStats::new();
-        
+
         assert_eq!(stats.active_subscriptions, 0);
         assert_eq!(stats.active_speakers, 0);
         assert_eq!(stats.total_events_received, 0);
@@ -1106,12 +1212,12 @@ mod tests {
         assert_eq!(stats.successful_renewals, 0);
         assert!(!stats.is_active());
         assert_eq!(stats.avg_subscriptions_per_speaker(), 0.0);
-        
+
         // Test with some values
         let mut stats = StreamStats::new();
         stats.active_subscriptions = 6;
         stats.active_speakers = 2;
-        
+
         assert!(stats.is_active());
         assert_eq!(stats.avg_subscriptions_per_speaker(), 3.0);
     }

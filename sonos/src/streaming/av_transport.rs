@@ -1,5 +1,5 @@
 use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
-use super::types::{ServiceType, SubscriptionConfig, SubscriptionId};
+use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use crate::models::{PlaybackState, Speaker, SpeakerId, StateChange, TrackInfo};
 use crate::transport::soap::SoapClient;
 use std::time::SystemTime;
@@ -89,12 +89,10 @@ impl AVTransportSubscription {
                 SubscriptionError::NetworkError(e.to_string())
             })?;
 
-        println!("📨 Received response: {}", response.status());
-
         if !response.status().is_success() {
             return match response.status().as_u16() {
                 503 => {
-                    println!("   Speaker appears to be a satellite/bonded speaker (503 Service Unavailable)");
+                    // Don't print error message here - let the caller handle satellite speaker detection
                     Err(SubscriptionError::SatelliteSpeaker)
                 }
                 _ => {
@@ -378,6 +376,10 @@ impl AVTransportSubscription {
 impl ServiceSubscription for AVTransportSubscription {
     fn service_type(&self) -> ServiceType {
         ServiceType::AVTransport
+    }
+
+    fn subscription_scope(&self) -> SubscriptionScope {
+        SubscriptionScope::PerSpeaker
     }
 
     fn speaker_id(&self) -> SpeakerId {

@@ -1,12 +1,22 @@
 use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 
+/// Indicates the scope of a service subscription
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscriptionScope {
+    /// Service requires individual subscriptions to each speaker (AVTransport, RenderingControl)
+    PerSpeaker,
+    /// Service requires only one subscription per network (ZoneGroupTopology)
+    NetworkWide,
+}
+
 /// Represents different UPnP service types that can be subscribed to
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ServiceType {
     AVTransport,
     RenderingControl,
     ContentDirectory,
+    ZoneGroupTopology,
 }
 
 impl ServiceType {
@@ -16,6 +26,7 @@ impl ServiceType {
             ServiceType::AVTransport => "urn:schemas-upnp-org:service:AVTransport:1",
             ServiceType::RenderingControl => "urn:schemas-upnp-org:service:RenderingControl:1",
             ServiceType::ContentDirectory => "urn:schemas-upnp-org:service:ContentDirectory:1",
+            ServiceType::ZoneGroupTopology => "urn:schemas-upnp-org:service:ZoneGroupTopology:1",
         }
     }
 
@@ -25,6 +36,7 @@ impl ServiceType {
             ServiceType::AVTransport => "/MediaRenderer/AVTransport/Control",
             ServiceType::RenderingControl => "/MediaRenderer/RenderingControl/Control",
             ServiceType::ContentDirectory => "/MediaServer/ContentDirectory/Control",
+            ServiceType::ZoneGroupTopology => "/ZoneGroupTopology/Control",
         }
     }
 
@@ -34,6 +46,17 @@ impl ServiceType {
             ServiceType::AVTransport => "/MediaRenderer/AVTransport/Event",
             ServiceType::RenderingControl => "/MediaRenderer/RenderingControl/Event",
             ServiceType::ContentDirectory => "/MediaServer/ContentDirectory/Event",
+            ServiceType::ZoneGroupTopology => "/ZoneGroupTopology/Event",
+        }
+    }
+
+    /// Get the subscription scope for this service type
+    pub fn subscription_scope(&self) -> SubscriptionScope {
+        match self {
+            ServiceType::AVTransport | ServiceType::RenderingControl | ServiceType::ContentDirectory => {
+                SubscriptionScope::PerSpeaker
+            }
+            ServiceType::ZoneGroupTopology => SubscriptionScope::NetworkWide,
         }
     }
 }
@@ -134,6 +157,7 @@ impl StreamConfig {
             enabled_services: vec![
                 ServiceType::AVTransport,
                 ServiceType::RenderingControl,
+                ServiceType::ZoneGroupTopology,
                 ServiceType::ContentDirectory,
             ],
             callback_port_range: (8080, 8100),
@@ -311,6 +335,10 @@ mod tests {
             ServiceType::ContentDirectory.service_type_urn(),
             "urn:schemas-upnp-org:service:ContentDirectory:1"
         );
+        assert_eq!(
+            ServiceType::ZoneGroupTopology.service_type_urn(),
+            "urn:schemas-upnp-org:service:ZoneGroupTopology:1"
+        );
     }
 
     #[test]
@@ -322,6 +350,30 @@ mod tests {
         assert_eq!(
             ServiceType::AVTransport.event_sub_url(),
             "/MediaRenderer/AVTransport/Event"
+        );
+        assert_eq!(
+            ServiceType::ZoneGroupTopology.event_sub_url(),
+            "/ZoneGroupTopology/Event"
+        );
+    }
+
+    #[test]
+    fn test_service_type_subscription_scope() {
+        assert_eq!(
+            ServiceType::AVTransport.subscription_scope(),
+            SubscriptionScope::PerSpeaker
+        );
+        assert_eq!(
+            ServiceType::RenderingControl.subscription_scope(),
+            SubscriptionScope::PerSpeaker
+        );
+        assert_eq!(
+            ServiceType::ContentDirectory.subscription_scope(),
+            SubscriptionScope::PerSpeaker
+        );
+        assert_eq!(
+            ServiceType::ZoneGroupTopology.subscription_scope(),
+            SubscriptionScope::NetworkWide
         );
     }
 

@@ -127,7 +127,7 @@ impl StateCache {
                         speaker_state.group_id = Some(group.id);
                         speaker_state.is_coordinator = member.speaker_id == group.coordinator;
                     }
-                    
+
                     // Also update satellite states if they exist
                     for &satellite_id in &member.satellites {
                         if let Some(satellite_state) = speakers.get_mut(&satellite_id) {
@@ -157,6 +157,150 @@ impl StateCache {
             .values()
             .find(|s| s.group_id == Some(group_id) && s.is_coordinator)
             .cloned()
+    }
+
+    /// Add a speaker to an existing group
+    pub fn add_speaker_to_group(&self, speaker_id: SpeakerId, group_id: GroupId) {
+        // Acquire locks in consistent order: groups first, then speakers
+        let mut groups = self.groups.write().unwrap();
+        let mut speakers = self.speakers.write().unwrap();
+
+        // Update the group
+        if let Some(group) = groups.get_mut(&group_id) {
+            group.add_member(speaker_id);
+        }
+
+        // Update the speaker's state
+        if let Some(speaker_state) = speakers.get_mut(&speaker_id) {
+            speaker_state.group_id = Some(group_id);
+            speaker_state.is_coordinator = false; // New members are never coordinators
+        }
+    }
+
+    /// Remove a speaker from its current group
+    pub fn remove_speaker_from_group(&self, speaker_id: SpeakerId) -> Option<GroupId> {
+        // Acquire locks in consistent order: groups first, then speakers
+        let mut groups = self.groups.write().unwrap();
+        let mut speakers = self.speakers.write().unwrap();
+
+        let mut former_group_id = None;
+
+        // Find and update the speaker's state
+        if let Some(speaker_state) = speakers.get_mut(&speaker_id) {
+            former_group_id = speaker_state.group_id;
+            speaker_state.group_id = None;
+            speaker_state.is_coordinator = false;
+        }
+
+        // Update the group
+        if let Some(group_id) = former_group_id {
+            if let Some(group) = groups.get_mut(&group_id) {
+                group.remove_member(speaker_id);
+
+                // If the group is now empty, remove it entirely
+                if group.member_count() == 0 {
+                    groups.remove(&group_id);
+                }
+            }
+        }
+
+        former_group_id
+    }
+
+    /// Change the coordinator of a group
+    pub fn change_group_coordinator(
+        &self,
+        group_id: GroupId,
+        new_coordinator: SpeakerId,
+    ) -> Option<SpeakerId> {
+        // Acquire locks in consistent order: groups first, then speakers
+        let mut groups = self.groups.write().unwrap();
+        let mut speakers = self.speakers.write().unwrap();
+
+        let mut old_coordinator = None;
+
+        // Update the group
+        if let Some(group) = groups.get_mut(&group_id) {
+            old_coordinator = Some(group.coordinator);
+            group.coordinator = new_coordinator;
+        }
+
+        // Update speaker states
+        // Remove coordinator status from old coordinator
+        if let Some(old_coord_id) = old_coordinator {
+            if let Some(old_coord_state) = speakers.get_mut(&old_coord_id) {
+                old_coord_state.is_coordinator = false;
+            }
+        }
+
+        // Set coordinator status for new coordinator
+        if let Some(new_coord_state) = speakers.get_mut(&new_coordinator) {
+            new_coord_state.is_coordinator = true;
+            new_coord_state.group_id = Some(group_id);
+        }
+
+        old_coordinator
+    }
+
+    /// Create a new group with the given coordinator and initial members
+    pub fn create_group(
+        &self,
+        coordinator_id: SpeakerId,
+        initial_members: Vec<SpeakerId>,
+    ) -> GroupId {
+        let mut group = Group::new(coordinator_id);
+
+        // Add all initial members to the group
+        for member_id in &initial_members {
+            if *member_id != coordinator_id {
+                group.add_member(*member_id);
+            }
+        }
+
+        let group_id = group.id;
+
+        // Acquire locks in consistent order: groups first, then speakers
+        let mut groups = self.groups.write().unwrap();
+        let mut speakers = self.speakers.write().unwrap();
+
+        // Add the group to the cache
+        groups.insert(group_id, group);
+
+        // Update all member speaker states
+        for member_id in &initial_members {
+            if let Some(speaker_state) = speakers.get_mut(member_id) {
+                speaker_state.group_id = Some(group_id);
+                speaker_state.is_coordinator = *member_id == coordinator_id;
+            }
+        }
+
+        group_id
+    }
+
+    /// Dissolve a group entirely
+    pub fn dissolve_group(&self, group_id: GroupId) -> Option<(SpeakerId, Vec<SpeakerId>)> {
+        // Acquire locks in consistent order: groups first, then speakers
+        let mut groups = self.groups.write().unwrap();
+        let mut speakers = self.speakers.write().unwrap();
+
+        let mut former_coordinator = None;
+        let mut former_members = Vec::new();
+
+        // Remove the group and get its info
+        if let Some(group) = groups.remove(&group_id) {
+            former_coordinator = Some(group.coordinator);
+            former_members = group.all_speaker_ids();
+        }
+
+        // Update all former member speaker states
+        for member_id in &former_members {
+            if let Some(speaker_state) = speakers.get_mut(member_id) {
+                speaker_state.group_id = None;
+                speaker_state.is_coordinator = false;
+            }
+        }
+
+        former_coordinator.map(|coord| (coord, former_members))
     }
 }
 
@@ -590,5 +734,147 @@ mod tests {
         let speaker2_state = cache.get_speaker(speaker2.id).unwrap();
         assert_eq!(speaker2_state.group_id, Some(group.id));
         assert_eq!(speaker2_state.is_coordinator, false);
+    }
+
+    #[test]
+    fn test_add_speaker_to_group() {
+        let (cache, speaker1, speaker2) = create_test_cache();
+
+        // Create a group with just speaker1
+        let group_id = cache.create_group(speaker1.id, vec![speaker1.id]);
+
+        // Add speaker2 to the group
+        cache.add_speaker_to_group(speaker2.id, group_id);
+
+        // Verify speaker2 is now in the group
+        let speaker2_state = cache.get_speaker(speaker2.id).unwrap();
+        assert_eq!(speaker2_state.group_id, Some(group_id));
+        assert_eq!(speaker2_state.is_coordinator, false);
+
+        // Verify the group has both members
+        let group = cache.get_group(group_id).unwrap();
+        assert_eq!(group.member_count(), 2);
+        assert!(group.is_member(speaker1.id));
+        assert!(group.is_member(speaker2.id));
+    }
+
+    #[test]
+    fn test_remove_speaker_from_group() {
+        let (cache, speaker1, speaker2) = create_test_cache();
+
+        // Create a group with both speakers
+        let group_id = cache.create_group(speaker1.id, vec![speaker1.id, speaker2.id]);
+
+        // Remove speaker2 from the group
+        let former_group_id = cache.remove_speaker_from_group(speaker2.id);
+
+        // Verify speaker2 was removed
+        assert_eq!(former_group_id, Some(group_id));
+        let speaker2_state = cache.get_speaker(speaker2.id).unwrap();
+        assert_eq!(speaker2_state.group_id, None);
+        assert_eq!(speaker2_state.is_coordinator, false);
+
+        // Verify the group now has only one member
+        let group = cache.get_group(group_id).unwrap();
+        assert_eq!(group.member_count(), 1);
+        assert!(group.is_member(speaker1.id));
+        assert!(!group.is_member(speaker2.id));
+    }
+
+    #[test]
+    fn test_change_group_coordinator() {
+        let (cache, speaker1, speaker2) = create_test_cache();
+
+        // Create a group with speaker1 as coordinator
+        let group_id = cache.create_group(speaker1.id, vec![speaker1.id, speaker2.id]);
+
+        // Change coordinator to speaker2
+        let old_coordinator = cache.change_group_coordinator(group_id, speaker2.id);
+
+        // Verify the change
+        assert_eq!(old_coordinator, Some(speaker1.id));
+
+        let speaker1_state = cache.get_speaker(speaker1.id).unwrap();
+        assert_eq!(speaker1_state.is_coordinator, false);
+
+        let speaker2_state = cache.get_speaker(speaker2.id).unwrap();
+        assert_eq!(speaker2_state.is_coordinator, true);
+
+        let group = cache.get_group(group_id).unwrap();
+        assert_eq!(group.coordinator, speaker2.id);
+    }
+
+    #[test]
+    fn test_create_group() {
+        let (cache, speaker1, speaker2) = create_test_cache();
+
+        // Create a group with both speakers
+        let group_id = cache.create_group(speaker1.id, vec![speaker1.id, speaker2.id]);
+
+        // Verify the group was created
+        let group = cache.get_group(group_id).unwrap();
+        assert_eq!(group.coordinator, speaker1.id);
+        assert_eq!(group.member_count(), 2);
+        assert!(group.is_member(speaker1.id));
+        assert!(group.is_member(speaker2.id));
+
+        // Verify speaker states were updated
+        let speaker1_state = cache.get_speaker(speaker1.id).unwrap();
+        assert_eq!(speaker1_state.group_id, Some(group_id));
+        assert_eq!(speaker1_state.is_coordinator, true);
+
+        let speaker2_state = cache.get_speaker(speaker2.id).unwrap();
+        assert_eq!(speaker2_state.group_id, Some(group_id));
+        assert_eq!(speaker2_state.is_coordinator, false);
+    }
+
+    #[test]
+    fn test_dissolve_group() {
+        let (cache, speaker1, speaker2) = create_test_cache();
+
+        // Create a group with both speakers
+        let group_id = cache.create_group(speaker1.id, vec![speaker1.id, speaker2.id]);
+
+        // Dissolve the group
+        let result = cache.dissolve_group(group_id);
+
+        // Verify the result
+        assert!(result.is_some());
+        let (former_coordinator, former_members) = result.unwrap();
+        assert_eq!(former_coordinator, speaker1.id);
+        assert_eq!(former_members.len(), 2);
+        assert!(former_members.contains(&speaker1.id));
+        assert!(former_members.contains(&speaker2.id));
+
+        // Verify the group was removed
+        assert!(cache.get_group(group_id).is_none());
+
+        // Verify speaker states were updated
+        let speaker1_state = cache.get_speaker(speaker1.id).unwrap();
+        assert_eq!(speaker1_state.group_id, None);
+        assert_eq!(speaker1_state.is_coordinator, false);
+
+        let speaker2_state = cache.get_speaker(speaker2.id).unwrap();
+        assert_eq!(speaker2_state.group_id, None);
+        assert_eq!(speaker2_state.is_coordinator, false);
+    }
+
+    #[test]
+    fn test_remove_speaker_from_empty_group() {
+        let (cache, speaker1, _) = create_test_cache();
+
+        // Create a group with just one speaker
+        let group_id = cache.create_group(speaker1.id, vec![speaker1.id]);
+
+        // Remove the only member (should dissolve the group)
+        let former_group_id = cache.remove_speaker_from_group(speaker1.id);
+
+        // Verify the speaker was removed and group was dissolved
+        assert_eq!(former_group_id, Some(group_id));
+        assert!(cache.get_group(group_id).is_none());
+
+        let speaker1_state = cache.get_speaker(speaker1.id).unwrap();
+        assert_eq!(speaker1_state.group_id, None);
+        assert_eq!(speaker1_state.is_coordinator, false);
     }
 }
