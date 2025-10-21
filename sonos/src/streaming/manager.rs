@@ -1051,46 +1051,6 @@ impl SubscriptionManager {
         Ok(())
     }
 
-    /// Check representative speaker availability (simplified - no automatic failover)
-    ///
-    /// This method is now a no-op to prevent automatic subscription recreation.
-    /// Network-wide subscriptions will be recreated naturally when speakers are added.
-    pub fn check_representative_speaker_availability(&self) -> SubscriptionResult<()> {
-        // Simplified: no automatic failover to prevent subscription recreation issues
-        log::debug!("Representative speaker availability check disabled to prevent subscription recreation");
-        Ok(())
-    }
-
-    /// Get information about current representative speakers for network-wide services
-    ///
-    /// Returns a mapping of service types to their representative speaker information.
-    /// This is useful for monitoring and debugging network-wide subscription health.
-    pub fn get_representative_speakers(&self) -> HashMap<ServiceType, RepresentativeSpeakerInfo> {
-        let mut result = HashMap::new();
-        
-        let network_subscriptions = self.network_subscriptions.read().unwrap();
-        let subscriptions = self.subscriptions.read().unwrap();
-        let speakers = self.speakers.read().unwrap();
-
-        for (&service_type, &subscription_id) in network_subscriptions.iter() {
-            if let Some(subscription) = subscriptions.get(&subscription_id) {
-                let speaker_id = subscription.speaker_id();
-                if let Some(speaker) = speakers.get(&speaker_id) {
-                    result.insert(service_type, RepresentativeSpeakerInfo {
-                        speaker_id,
-                        speaker_name: speaker.name.clone(),
-                        speaker_ip: speaker.ip_address.clone(),
-                        subscription_id,
-                        is_active: subscription.is_active(),
-                        last_renewal: subscription.last_renewal(),
-                    });
-                }
-            }
-        }
-
-        result
-    }
-
     /// Shutdown the subscription manager
     ///
     /// This method cleanly shuts down all subscriptions and releases resources.
