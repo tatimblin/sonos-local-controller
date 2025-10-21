@@ -26,16 +26,11 @@ fn create_test_speaker(id_suffix: &str, ip: &str) -> Speaker {
 /// Helper function to create a test subscription
 fn create_test_subscription() -> ZoneGroupTopologySubscription {
     let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-    let network_speakers = vec![
-        representative_speaker.clone(),
-        create_test_speaker("987654321", "192.168.1.101"),
-    ];
     let callback_url = "http://localhost:8080/callback/test".to_string();
     let config = SubscriptionConfig::default();
 
     ZoneGroupTopologySubscription::new(
         representative_speaker,
-        network_speakers,
         callback_url,
         config,
     )

@@ -20,23 +20,16 @@ fn test_subscription_error_types() {
         message: "Test conflict".to_string(),
     };
     
-    let repr_selection_failed = SubscriptionError::RepresentativeSelectionFailed {
-        service: ServiceType::ZoneGroupTopology,
-        message: "Test selection failure".to_string(),
-    };
-    
     let registry_corruption = SubscriptionError::RegistryCorruption {
         message: "Test corruption".to_string(),
     };
 
     // Verify error types can be cloned (needed for error isolation)
     let _cloned_conflict = service_conflict.clone();
-    let _cloned_selection = repr_selection_failed.clone();
     let _cloned_corruption = registry_corruption.clone();
 
     // Verify error messages contain service type information
     assert!(service_conflict.to_string().contains("ZoneGroupTopology"));
-    assert!(repr_selection_failed.to_string().contains("ZoneGroupTopology"));
     assert!(registry_corruption.to_string().contains("corruption"));
 }
 

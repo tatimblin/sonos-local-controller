@@ -27,25 +27,16 @@ fn test_error_isolation_error_types() {
         message: "Test conflict".to_string(),
     };
 
-    let repr_selection_failed = SubscriptionError::RepresentativeSelectionFailed {
-        service: ServiceType::ZoneGroupTopology,
-        message: "Test selection failure".to_string(),
-    };
-
     let registry_corruption = SubscriptionError::RegistryCorruption {
         message: "Test corruption".to_string(),
     };
 
     // Verify error types can be cloned (needed for error isolation)
     let _cloned_conflict = service_conflict.clone();
-    let _cloned_selection = repr_selection_failed.clone();
     let _cloned_corruption = registry_corruption.clone();
 
     // Verify error messages contain service type information
     assert!(service_conflict.to_string().contains("ZoneGroupTopology"));
-    assert!(repr_selection_failed
-        .to_string()
-        .contains("ZoneGroupTopology"));
     assert!(registry_corruption.to_string().contains("corruption"));
 }
 
@@ -93,27 +84,11 @@ fn test_error_isolation_error_message_formatting() {
         message: "PerSpeaker conflict".to_string(),
     };
 
-    let topology_error = SubscriptionError::RepresentativeSelectionFailed {
-        service: ServiceType::ZoneGroupTopology,
-        message: "NetworkWide selection failed".to_string(),
-    };
-
     // Error messages should clearly identify the service type
     let av_error_str = av_transport_error.to_string();
-    let topology_error_str = topology_error.to_string();
 
     assert!(
         av_error_str.contains("AVTransport"),
         "AVTransport error should mention service type"
-    );
-    assert!(
-        topology_error_str.contains("ZoneGroupTopology"),
-        "ZoneGroupTopology error should mention service type"
-    );
-
-    // Error messages should be different for different service types
-    assert_ne!(
-        av_error_str, topology_error_str,
-        "Different service errors should have different messages"
     );
 }
