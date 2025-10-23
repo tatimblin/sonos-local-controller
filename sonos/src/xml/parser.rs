@@ -122,6 +122,9 @@ impl<'a> XmlParser<'a> {
             .replace("&apos;", "'")
             .replace("&#39;", "'")
             .replace("&#34;", "\"")
+            .replace("&#60;", "<")
+            .replace("&#62;", ">")
+            .replace("&#38;", "&")
     }
 }
 

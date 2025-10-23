@@ -7,6 +7,92 @@ use quick_xml::events::Event;
 
 /// ZoneGroupTopology service-specific extensions for the XML parser
 impl<'a> XmlParser<'a> {
+    /// Parse zone group state from a UPnP event XML in one call
+    ///
+    /// This method handles the complete process:
+    /// 1. Extract ZoneGroupState property from UPnP event XML
+    /// 2. Decode XML entities and CDATA
+    /// 3. Parse the zone group structure
+    ///
+    /// Input XML structure:
+    /// ```xml
+    /// <property>
+    ///   <ZoneGroupState>&lt;ZoneGroups&gt;...&lt;/ZoneGroups&gt;</ZoneGroupState>
+    /// </property>
+    /// ```
+    pub fn parse_zone_group_state_from_upnp_event(&mut self) -> XmlParseResult<Vec<XmlZoneGroupData>> {
+        // First validate that this looks like a UPnP event structure
+        let xml_content = std::str::from_utf8(self.reader.get_ref())
+            .map_err(|e| crate::xml::XmlParseError::SyntaxError(format!("Invalid UTF-8: {}", e)))?;
+        
+        if !Self::validate_upnp_event_structure(xml_content)? {
+            return Err(crate::xml::XmlParseError::InvalidStructure(
+                "Invalid UPnP event structure".to_string(),
+            ));
+        }
+
+        // Extract ZoneGroupState property from UPnP event
+        if let Some(zone_group_state_xml) = self.extract_property_value("ZoneGroupState")? {
+            if zone_group_state_xml.trim().is_empty() {
+                return Ok(Vec::new());
+            }
+
+            // Decode XML entities and CDATA
+            let decoded_xml = Self::decode_entities_with_cdata(&zone_group_state_xml);
+            
+            // Parse the zone group structure
+            let mut zone_parser = XmlParser::new(&decoded_xml);
+            zone_parser.parse_zone_group_state()
+        } else {
+            // No ZoneGroupState property found
+            Ok(Vec::new())
+        }
+    }
+
+    /// Validate that the XML has a basic UPnP event structure
+    fn validate_upnp_event_structure(xml_content: &str) -> XmlParseResult<bool> {
+        let mut temp_parser = XmlParser::new(xml_content);
+        let mut buffer = Vec::new();
+        let mut found_property = false;
+
+        loop {
+            buffer.clear();
+            match temp_parser.reader.read_event_into(&mut buffer)? {
+                Event::Start(ref e) => {
+                    // Check if this is a property element (with or without namespace)
+                    if e.name().as_ref() == b"property" || e.name().as_ref().ends_with(b":property") {
+                        found_property = true;
+                        break;
+                    }
+                }
+                Event::Eof => break,
+                _ => {}
+            }
+        }
+
+        Ok(found_property)
+    }
+
+    /// Decode XML entities and handle CDATA sections
+    pub fn decode_entities_with_cdata(text: &str) -> String {
+        let mut result = text.to_string();
+        
+        // Handle CDATA sections first
+        while let Some(cdata_start) = result.find("<![CDATA[") {
+            if let Some(cdata_end) = result[cdata_start..].find("]]>") {
+                let cdata_end_abs = cdata_start + cdata_end;
+                let cdata_content = &result[cdata_start + 9..cdata_end_abs];
+                let before = &result[..cdata_start];
+                let after = &result[cdata_end_abs + 3..];
+                result = format!("{}{}{}", before, cdata_content, after);
+            } else {
+                break;
+            }
+        }
+        
+        // Use standard entity decoding
+        Self::decode_entities(&result)
+    }
     /// Parse zone group state from ZoneGroupTopology event XML
     ///
     /// This method parses the ZoneGroupState property which contains XML like:
@@ -98,17 +184,30 @@ impl<'a> XmlParser<'a> {
                         b"ZoneGroupMember" => {
                             // Handle self-closing member
                             let mut uuid = String::new();
+                            let mut satellites = Vec::new();
+                            
                             for attr in e.attributes() {
                                 let attr = attr?;
-                                if attr.key.as_ref() == b"UUID" {
-                                    uuid = attr.unescape_value()?.into_owned();
-                                    break;
+                                match attr.key.as_ref() {
+                                    b"UUID" => {
+                                        uuid = attr.unescape_value()?.into_owned();
+                                    }
+                                    b"Satellites" => {
+                                        let satellites_attr = attr.unescape_value()?.into_owned();
+                                        if !satellites_attr.trim().is_empty() {
+                                            for satellite_uuid in satellites_attr.split(',') {
+                                                let satellite_uuid = satellite_uuid.trim();
+                                                if !satellite_uuid.is_empty() {
+                                                    satellites.push(satellite_uuid.to_string());
+                                                }
+                                            }
+                                        }
+                                    }
+                                    _ => {}
                                 }
                             }
-                            let member = XmlZoneGroupMember {
-                                uuid,
-                                satellites: Vec::new(),
-                            };
+                            
+                            let member = XmlZoneGroupMember { uuid, satellites };
                             if let Some(ref mut zone_group) = current_zone_group {
                                 zone_group.members.push(member);
                             }
@@ -161,6 +260,10 @@ impl<'a> XmlParser<'a> {
     /// ```xml
     /// <ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" ... />
     /// ```
+    /// or with satellites:
+    /// ```xml
+    /// <ZoneGroupMember UUID="RINCON_123456789" Satellites="RINCON_SAT001,RINCON_SAT002" ... />
+    /// ```
     pub fn parse_zone_group_member(
         &mut self,
         member_xml: &str,
@@ -175,8 +278,23 @@ impl<'a> XmlParser<'a> {
                     // Extract UUID attribute
                     let uuid = parser.extract_attribute(member_xml, "UUID")?;
 
-                    // Parse satellites if any (they would be nested elements)
-                    let satellites = parser.parse_satellites()?;
+                    let mut satellites = Vec::new();
+
+                    // Format 1: Check for Satellites attribute (comma-separated UUIDs)
+                    if let Ok(satellites_attr) = parser.extract_attribute(member_xml, "Satellites") {
+                        if !satellites_attr.trim().is_empty() {
+                            for satellite_uuid in satellites_attr.split(',') {
+                                let uuid = satellite_uuid.trim();
+                                if !uuid.is_empty() {
+                                    satellites.push(uuid.to_string());
+                                }
+                            }
+                        }
+                    }
+
+                    // Format 2: Parse nested satellite elements (if any)
+                    let nested_satellites = parser.parse_satellites()?;
+                    satellites.extend(nested_satellites);
 
                     return Ok(XmlZoneGroupMember { uuid, satellites });
                 }

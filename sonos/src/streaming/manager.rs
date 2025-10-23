@@ -1561,7 +1561,9 @@ mod tests {
         let subscription_id = super::super::types::SubscriptionId::new();
         let callback_url = manager.get_callback_url(subscription_id);
 
-        assert!(callback_url.starts_with("http://127.0.0.1:"));
+        // The callback URL should start with http:// and contain the subscription ID
+        // It may use localhost (127.0.0.1) or the actual local IP address
+        assert!(callback_url.starts_with("http://"));
         assert!(callback_url.contains(&format!("/callback/{}", subscription_id)));
     }
 

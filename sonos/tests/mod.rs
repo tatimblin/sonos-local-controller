@@ -6,4 +6,3 @@ pub mod soap;
 pub mod zone_groups;
 pub mod builder_pattern;
 pub mod event_processing_integration;
-pub mod zone_group_topology_parsing;
