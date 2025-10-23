@@ -2,6 +2,7 @@ use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionRe
 use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use crate::models::{PlaybackState, Speaker, SpeakerId, StateChange, TrackInfo};
 use crate::transport::soap::SoapClient;
+use crate::xml::XmlParser;
 use std::time::SystemTime;
 
 /// AVTransport service subscription implementation
@@ -193,184 +194,84 @@ impl AVTransportSubscription {
         println!("   XML length: {} bytes", xml.len());
         println!("   XML preview: {}", xml.chars().take(200).collect::<String>());
         
-        // Look for TransportState in the event XML
-        if let Some(state_str) = self.extract_property_value(xml, "TransportState") {
-            println!("✅ Found TransportState: {}", state_str);
-            match state_str.as_str() {
-                "PLAYING" => Ok(Some(PlaybackState::Playing)),
-                "PAUSED_PLAYBACK" => Ok(Some(PlaybackState::Paused)),
-                "STOPPED" => Ok(Some(PlaybackState::Stopped)),
-                "TRANSITIONING" => Ok(Some(PlaybackState::Transitioning)),
-                _ => {
-                    println!("⚠️  Unknown transport state: {}", state_str);
-                    Ok(None) // Unknown state, ignore
-                }
-            }
-        } else {
-            println!("❌ No TransportState found in XML");
-            
-            // Try to extract LastChange content for debugging
-            if let Some(last_change) = self.extract_property_value(xml, "LastChange") {
-                println!("🔍 Found LastChange content:");
-                println!("   {}", last_change.chars().take(300).collect::<String>());
-                
-                // Try to parse the escaped XML in LastChange
-                let decoded = self.decode_xml_entities(&last_change);
-                println!("🔍 Decoded LastChange:");
-                println!("   {}", decoded.chars().take(300).collect::<String>());
-                
-                // Look for TransportState in the decoded content
-                if decoded.contains("TransportState") {
-                    println!("✅ Found TransportState in decoded LastChange!");
-                    // Try to extract the val attribute
-                    if let Some(start) = decoded.find("TransportState val=\"") {
-                        let content_start = start + "TransportState val=\"".len();
-                        if let Some(end) = decoded[content_start..].find("\"") {
-                            let state_value = &decoded[content_start..content_start + end];
-                            println!("✅ Extracted TransportState value: {}", state_value);
-                            
-                            match state_value {
-                                "PLAYING" => return Ok(Some(PlaybackState::Playing)),
-                                "PAUSED_PLAYBACK" => return Ok(Some(PlaybackState::Paused)),
-                                "STOPPED" => return Ok(Some(PlaybackState::Stopped)),
-                                "TRANSITIONING" => return Ok(Some(PlaybackState::Transitioning)),
-                                _ => {
-                                    println!("⚠️  Unknown transport state in LastChange: {}", state_value);
-                                    return Ok(None);
-                                }
-                            }
-                        }
+        // Use XML parser to extract transport state
+        let mut parser = XmlParser::new(xml);
+        match parser.parse_transport_state() {
+            Ok(Some(state_str)) => {
+                println!("✅ Found TransportState: {}", state_str);
+                match state_str.as_str() {
+                    "PLAYING" => Ok(Some(PlaybackState::Playing)),
+                    "PAUSED_PLAYBACK" => Ok(Some(PlaybackState::Paused)),
+                    "STOPPED" => Ok(Some(PlaybackState::Stopped)),
+                    "TRANSITIONING" => Ok(Some(PlaybackState::Transitioning)),
+                    _ => {
+                        println!("⚠️  Unknown transport state: {}", state_str);
+                        Ok(None) // Unknown state, ignore
                     }
                 }
             }
-            
-            Ok(None) // No transport state in this event
+            Ok(None) => {
+                println!("❌ No TransportState found in XML");
+                Ok(None) // No transport state in this event
+            }
+            Err(e) => {
+                println!("❌ XML parsing error: {}", e);
+                Err(SubscriptionError::XmlParseError(e.to_string()))
+            }
         }
     }
 
     /// Parse current track information from UPnP event XML
     fn parse_current_track_info(&self, xml: &str) -> SubscriptionResult<Option<TrackInfo>> {
-        // Look for CurrentTrackMetaData in the event XML
-        if let Some(metadata_xml) = self.extract_property_value(xml, "CurrentTrackMetaData") {
-            if metadata_xml.is_empty() || metadata_xml == "NOT_IMPLEMENTED" {
-                return Ok(None);
-            }
+        // Use XML parser to extract all AVTransport data
+        let mut parser = XmlParser::new(xml);
+        match parser.parse_av_transport_event() {
+            Ok(av_data) => {
+                let mut title = None;
+                let mut artist = None;
+                let mut album = None;
+                
+                // Extract metadata if available
+                if let Some(metadata) = av_data.current_track_metadata {
+                    title = metadata.title;
+                    artist = metadata.artist;
+                    album = metadata.album;
+                }
 
-            // Parse DIDL-Lite metadata
-            let title = self.extract_didl_value(&metadata_xml, "dc:title");
-            let artist = self.extract_didl_value(&metadata_xml, "dc:creator");
-            let album = self.extract_didl_value(&metadata_xml, "upnp:album");
-
-            // Parse duration from CurrentTrackDuration property
-            let duration_ms = self
-                .extract_property_value(xml, "CurrentTrackDuration")
-                .and_then(|duration_str| self.parse_duration(&duration_str));
-
-            // Parse URI from CurrentTrackURI property
-            let uri = self.extract_property_value(xml, "CurrentTrackURI");
-
-            // Only return TrackInfo if we have at least some information
-            if title.is_some() || artist.is_some() || album.is_some() || uri.is_some() {
-                Ok(Some(TrackInfo {
-                    title,
-                    artist,
-                    album,
-                    duration_ms,
-                    uri,
-                }))
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Extract a property value from UPnP event XML
-    fn extract_property_value(&self, xml: &str, property_name: &str) -> Option<String> {
-        // UPnP events use a specific XML structure with <property> elements
-        // Handle both namespaced and non-namespaced property elements
-        let property_patterns = [
-            ("<property>", "</property>"),
-            ("<e:property>", "</e:property>"),
-        ];
-        
-        let var_start = format!("<{}>", property_name);
-        let var_end = format!("</{}>", property_name);
-
-        // Try each property pattern
-        for (property_start, property_end) in &property_patterns {
-            let mut search_pos = 0;
-            while let Some(prop_start) = xml[search_pos..].find(property_start) {
-                let prop_start_abs = search_pos + prop_start;
-                if let Some(prop_end) = xml[prop_start_abs..].find(property_end) {
-                    let prop_end_abs = prop_start_abs + prop_end + property_end.len();
-                    let property_xml = &xml[prop_start_abs..prop_end_abs];
-
-                    // Look for our variable within this property block
-                    if let Some(var_start_pos) = property_xml.find(&var_start) {
-                        if let Some(var_end_pos) = property_xml[var_start_pos..].find(&var_end) {
-                            let content_start = var_start_pos + var_start.len();
-                            let content_end = var_start_pos + var_end_pos;
-                            let content = &property_xml[content_start..content_end];
-
-                            // Decode XML entities
-                            return Some(self.decode_xml_entities(content));
+                // Parse duration using XML parser helper (convert seconds to milliseconds)
+                let duration_ms = av_data.current_track_duration
+                    .and_then(|duration_str| {
+                        if duration_str.is_empty() || duration_str == "NOT_IMPLEMENTED" {
+                            None
+                        } else {
+                            parser.parse_duration(&duration_str).map(|seconds| seconds * 1000)
                         }
-                    }
+                    });
 
-                    search_pos = prop_end_abs;
+                // Get URI
+                let uri = av_data.current_track_uri;
+
+                // Only return TrackInfo if we have at least some information
+                if title.is_some() || artist.is_some() || album.is_some() || uri.is_some() {
+                    Ok(Some(TrackInfo {
+                        title,
+                        artist,
+                        album,
+                        duration_ms,
+                        uri,
+                    }))
                 } else {
-                    break;
+                    Ok(None)
                 }
             }
-        }
-
-        None
-    }
-
-    /// Extract a value from DIDL-Lite XML metadata
-    fn extract_didl_value(&self, didl_xml: &str, tag: &str) -> Option<String> {
-        let start_tag = format!("<{}>", tag);
-        let end_tag = format!("</{}>", tag);
-
-        if let Some(start_pos) = didl_xml.find(&start_tag) {
-            let content_start = start_pos + start_tag.len();
-            if let Some(end_pos) = didl_xml[content_start..].find(&end_tag) {
-                let content = &didl_xml[content_start..content_start + end_pos];
-                return Some(self.decode_xml_entities(content));
+            Err(e) => {
+                println!("❌ XML parsing error in track info: {}", e);
+                Err(SubscriptionError::XmlParseError(e.to_string()))
             }
         }
-
-        None
     }
 
-    /// Parse duration string (HH:MM:SS or HH:MM:SS.mmm) to milliseconds
-    fn parse_duration(&self, duration_str: &str) -> Option<u64> {
-        let parts: Vec<&str> = duration_str.split(':').collect();
-        if parts.len() >= 3 {
-            let hours: u64 = parts[0].parse().ok()?;
-            let minutes: u64 = parts[1].parse().ok()?;
 
-            // Handle seconds with optional milliseconds
-            let seconds_part = parts[2];
-            let seconds: f64 = seconds_part.parse().ok()?;
-
-            let total_ms = (hours * 3600 + minutes * 60) * 1000 + (seconds * 1000.0) as u64;
-            Some(total_ms)
-        } else {
-            None
-        }
-    }
-
-    /// Decode basic XML entities
-    fn decode_xml_entities(&self, text: &str) -> String {
-        text.replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&")
-            .replace("&quot;", "\"")
-            .replace("&apos;", "'")
-    }
 }
 
 impl ServiceSubscription for AVTransportSubscription {
@@ -564,36 +465,22 @@ mod tests {
 
     #[test]
     fn test_parse_duration() {
-        let speaker = create_test_speaker();
-        let subscription = AVTransportSubscription::new(
-            speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
+        let parser = XmlParser::new("");
 
         // Test normal duration
-        assert_eq!(subscription.parse_duration("0:03:45"), Some(225000)); // 3:45 = 225 seconds = 225000ms
-        assert_eq!(subscription.parse_duration("1:23:45"), Some(5025000)); // 1:23:45 = 5025 seconds
+        assert_eq!(parser.parse_duration("0:03:45"), Some(225)); // 3:45 = 225 seconds
+        assert_eq!(parser.parse_duration("1:23:45"), Some(5025)); // 1:23:45 = 5025 seconds
 
-        // Test with milliseconds
-        assert_eq!(subscription.parse_duration("0:00:30.500"), Some(30500)); // 30.5 seconds
+        // Test MM:SS format
+        assert_eq!(parser.parse_duration("3:45"), Some(225)); // 3:45 = 225 seconds
 
         // Test invalid format
-        assert_eq!(subscription.parse_duration("invalid"), None);
-        assert_eq!(subscription.parse_duration("1:23"), None); // Missing seconds
+        assert_eq!(parser.parse_duration("invalid"), None);
+        assert_eq!(parser.parse_duration(""), None);
     }
 
     #[test]
     fn test_extract_property_value() {
-        let speaker = create_test_speaker();
-        let subscription = AVTransportSubscription::new(
-            speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
         let xml = r#"
             <property>
                 <TransportState>PLAYING</TransportState>
@@ -604,32 +491,29 @@ mod tests {
             </property>
         "#;
 
+        let mut parser = XmlParser::new(xml);
         assert_eq!(
-            subscription.extract_property_value(xml, "TransportState"),
+            parser.extract_property_value("TransportState").unwrap(),
             Some("PLAYING".to_string())
         );
+        
+        let mut parser = XmlParser::new(xml);
         assert_eq!(
-            subscription.extract_property_value(xml, "Volume"),
+            parser.extract_property_value("Volume").unwrap(),
             Some("50".to_string())
         );
+        
+        let mut parser = XmlParser::new(xml);
         assert_eq!(
-            subscription.extract_property_value(xml, "NonExistent"),
+            parser.extract_property_value("NonExistent").unwrap(),
             None
         );
     }
 
     #[test]
     fn test_decode_xml_entities() {
-        let speaker = create_test_speaker();
-        let subscription = AVTransportSubscription::new(
-            speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
         let encoded = "Artist &amp; Band &lt;Live&gt; &quot;Greatest Hits&quot;";
-        let decoded = subscription.decode_xml_entities(encoded);
+        let decoded = XmlParser::decode_entities(encoded);
         assert_eq!(decoded, "Artist & Band <Live> \"Greatest Hits\"");
     }
 
@@ -770,15 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_didl_value() {
-        let speaker = create_test_speaker();
-        let subscription = AVTransportSubscription::new(
-            speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
+    fn test_extract_didl_metadata() {
         let didl_xml = r#"
             <DIDL-Lite>
                 <item>
@@ -789,22 +665,12 @@ mod tests {
             </DIDL-Lite>
         "#;
 
-        assert_eq!(
-            subscription.extract_didl_value(didl_xml, "dc:title"),
-            Some("Test Title".to_string())
-        );
-        assert_eq!(
-            subscription.extract_didl_value(didl_xml, "dc:creator"),
-            Some("Test Creator".to_string())
-        );
-        assert_eq!(
-            subscription.extract_didl_value(didl_xml, "upnp:album"),
-            Some("Test Album".to_string())
-        );
-        assert_eq!(
-            subscription.extract_didl_value(didl_xml, "nonexistent"),
-            None
-        );
+        let mut parser = XmlParser::new("");
+        let metadata = parser.extract_didl_metadata(didl_xml).unwrap();
+        
+        assert_eq!(metadata.title, Some("Test Title".to_string()));
+        assert_eq!(metadata.artist, Some("Test Creator".to_string()));
+        assert_eq!(metadata.album, Some("Test Album".to_string()));
     }
 
     #[test]
