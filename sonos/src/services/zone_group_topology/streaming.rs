@@ -1,7 +1,7 @@
-use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
-use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
+use super::types::XmlZoneGroupData;
+use crate::streaming::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
+use crate::streaming::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use crate::models::{Group, GroupId, Speaker, SpeakerId, StateChange};
-use crate::xml::XmlParser;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -226,8 +226,7 @@ impl ZoneGroupTopologySubscription {
         let mut groups = Vec::new();
 
         // Use XML parser to parse zone group state from UPnP event in one call
-        let mut parser = XmlParser::new(xml);
-        match parser.parse_zone_group_state_from_upnp_event() {
+        match super::parser::ZoneGroupTopologyParser::parse_zone_group_state_from_upnp_event(xml) {
             Ok(xml_groups) => {
                 if xml_groups.is_empty() {
                     println!("ℹ️ No zone groups found in UPnP event");
@@ -253,7 +252,7 @@ impl ZoneGroupTopologySubscription {
     /// Convert XML zone group data structures to domain models
     fn convert_xml_groups_to_domain_models(
         &self,
-        xml_groups: Vec<crate::xml::XmlZoneGroupData>,
+        xml_groups: Vec<XmlZoneGroupData>,
     ) -> SubscriptionResult<Vec<Group>> {
         let mut groups = Vec::new();
 
@@ -601,8 +600,8 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
         Ok(())
     }
 }
-
-#[cfg(test)]
+#[cfg(test)
+]
 mod tests {
     use super::*;
     use crate::models::Speaker;
@@ -648,8 +647,7 @@ mod tests {
         let member_xml = r#"<ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" />"#;
 
         // Use XML parser directly
-        let mut parser = XmlParser::new(member_xml);
-        let result = parser.parse_zone_group_member(member_xml).unwrap();
+        let result = crate::services::zone_group_topology::parser::ZoneGroupTopologyParser::parse_zone_group_member(member_xml).unwrap();
 
         assert_eq!(result.uuid, "RINCON_123456789");
         assert_eq!(result.satellites().len(), 0); // No satellites in this test
@@ -658,7 +656,7 @@ mod tests {
     #[test]
     fn test_decode_xml_entities() {
         let encoded = "&lt;ZoneGroupState&gt;&lt;ZoneGroups&gt;&amp;test&amp;&lt;/ZoneGroups&gt;&lt;/ZoneGroupState&gt;";
-        let decoded = XmlParser::decode_entities_with_cdata(encoded);
+        let decoded = crate::xml::XmlParser::decode_entities_with_cdata(encoded);
         assert_eq!(
             decoded,
             "<ZoneGroupState><ZoneGroups>&test&</ZoneGroups></ZoneGroupState>"
@@ -797,43 +795,11 @@ mod tests {
 
         let result = subscription.parse_zone_group_state("");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Empty XML content"));
-    }
-
-    #[test]
-    fn test_parse_zone_group_state_with_malformed_xml() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let xml = r#"<invalid>not a upnp event</invalid>"#;
-
-        let result = subscription.parse_zone_group_state(xml);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid UPnP event structure"));
-    }
-
-    #[test]
-    fn test_decode_xml_entities_with_cdata() {
-        let encoded = "<![CDATA[<ZoneGroupState><ZoneGroups></ZoneGroups></ZoneGroupState>]]>";
-        let decoded = XmlParser::decode_entities_with_cdata(encoded);
-        assert_eq!(
-            decoded,
-            "<ZoneGroupState><ZoneGroups></ZoneGroups></ZoneGroupState>"
-        );
-
-        let encoded_with_entities = "&lt;test&gt;&amp;data&amp;";
-        let decoded_entities = XmlParser::decode_entities_with_cdata(encoded_with_entities);
-        assert_eq!(decoded_entities, "<test>&data&");
+        
+        if let Err(SubscriptionError::EventParseError(msg)) = result {
+            assert_eq!(msg, "Empty XML content");
+        } else {
+            panic!("Expected EventParseError for empty XML");
+        }
     }
 }

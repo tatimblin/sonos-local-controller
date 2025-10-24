@@ -4,7 +4,6 @@ pub mod error;
 pub mod parser;
 pub mod rendering_control;
 pub mod types;
-pub mod upnp;
 pub mod zone_group_topology;
 
 // Re-export public API for easy access
@@ -39,18 +38,16 @@ mod integration_tests {
 
     #[test]
     fn test_module_integration() {
-        // Test that all modules work together
-        let xml = "<root><volume>50</volume></root>";
-        let mut parser = XmlParser::new(xml);
+        // Test serde-based parsing integration
+        let xml = r#"
+            <property>
+                <Volume>50</Volume>
+                <Mute>0</Mute>
+            </property>
+        "#;
         
-        let volume = parser.find_element("volume").unwrap();
-        assert_eq!(volume, Some("50".to_string()));
-
-        // Test data structure creation
-        let rendering_data = XmlRenderingControlData {
-            volume: Some(50),
-            muted: Some(false),
-        };
-        assert_eq!(rendering_data.volume, Some(50));
+        let result = XmlParser::parse_rendering_control_serde(xml).unwrap();
+        assert_eq!(result.volume, Some(50));
+        assert_eq!(result.muted, Some(false));
     }
 }

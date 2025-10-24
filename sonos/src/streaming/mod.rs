@@ -19,7 +19,7 @@ pub use interface::{
 pub use builder::{EventStreamBuilder, ActiveEventStream};
 
 // Re-export essential types needed by the public interface
-pub use types::{ServiceType, SubscriptionScope, SubscriptionConfig};
+pub use types::{ServiceType, SubscriptionScope, SubscriptionConfig, SubscriptionId};
 
 // Internal re-exports for use within the streaming module
 // (Currently no internal re-exports needed)

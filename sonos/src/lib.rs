@@ -5,6 +5,7 @@ pub mod api;
 pub mod state;
 pub mod streaming;
 pub mod xml;
+pub mod services;
 
 // Re-export key types for easier access
 pub use models::{Speaker, Group, SpeakerId, GroupId, SpeakerState, PlaybackState, StateChange};

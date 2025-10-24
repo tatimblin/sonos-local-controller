@@ -1,8 +1,9 @@
-use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
-use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
+use super::parser;
 use crate::models::{PlaybackState, Speaker, SpeakerId, StateChange, TrackInfo};
+use crate::streaming::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
+use crate::streaming::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use crate::transport::soap::SoapClient;
-use crate::xml::XmlParser;
+// XML parsing is handled by the parser module
 use std::time::SystemTime;
 
 /// AVTransport service subscription implementation
@@ -192,11 +193,13 @@ impl AVTransportSubscription {
     fn parse_transport_state(&self, xml: &str) -> SubscriptionResult<Option<PlaybackState>> {
         println!("🔍 Parsing transport state from XML...");
         println!("   XML length: {} bytes", xml.len());
-        println!("   XML preview: {}", xml.chars().take(200).collect::<String>());
-        
+        println!(
+            "   XML preview: {}",
+            xml.chars().take(200).collect::<String>()
+        );
+
         // Use XML parser to extract transport state
-        let mut parser = XmlParser::new(xml);
-        match parser.parse_transport_state() {
+        match parser::parse_transport_state(xml) {
             Ok(Some(state_str)) => {
                 println!("✅ Found TransportState: {}", state_str);
                 match state_str.as_str() {
@@ -224,13 +227,12 @@ impl AVTransportSubscription {
     /// Parse current track information from UPnP event XML
     fn parse_current_track_info(&self, xml: &str) -> SubscriptionResult<Option<TrackInfo>> {
         // Use XML parser to extract all AVTransport data
-        let mut parser = XmlParser::new(xml);
-        match parser.parse_av_transport_event() {
+        match parser::parse_av_transport_event(xml) {
             Ok(av_data) => {
                 let mut title = None;
                 let mut artist = None;
                 let mut album = None;
-                
+
                 // Extract metadata if available
                 if let Some(metadata) = av_data.current_track_metadata {
                     title = metadata.title;
@@ -239,14 +241,13 @@ impl AVTransportSubscription {
                 }
 
                 // Parse duration using XML parser helper (convert seconds to milliseconds)
-                let duration_ms = av_data.current_track_duration
-                    .and_then(|duration_str| {
-                        if duration_str.is_empty() || duration_str == "NOT_IMPLEMENTED" {
-                            None
-                        } else {
-                            parser.parse_duration(&duration_str).map(|seconds| seconds * 1000)
-                        }
-                    });
+                let duration_ms = av_data.current_track_duration.and_then(|duration_str| {
+                    if duration_str.is_empty() || duration_str == "NOT_IMPLEMENTED" {
+                        None
+                    } else {
+                        parser::parse_duration(&duration_str).map(|seconds| seconds * 1000)
+                    }
+                });
 
                 // Get URI
                 let uri = av_data.current_track_uri;
@@ -270,8 +271,6 @@ impl AVTransportSubscription {
             }
         }
     }
-
-
 }
 
 impl ServiceSubscription for AVTransportSubscription {
@@ -465,24 +464,22 @@ mod tests {
 
     #[test]
     fn test_parse_duration() {
-        let parser = XmlParser::new("");
-
         // Test normal duration
-        assert_eq!(parser.parse_duration("0:03:45"), Some(225)); // 3:45 = 225 seconds
-        assert_eq!(parser.parse_duration("1:23:45"), Some(5025)); // 1:23:45 = 5025 seconds
+        assert_eq!(parser::parse_duration("0:03:45"), Some(225)); // 3:45 = 225 seconds
+        assert_eq!(parser::parse_duration("1:23:45"), Some(5025)); // 1:23:45 = 5025 seconds
 
         // Test MM:SS format
-        assert_eq!(parser.parse_duration("3:45"), Some(225)); // 3:45 = 225 seconds
+        assert_eq!(parser::parse_duration("3:45"), Some(225)); // 3:45 = 225 seconds
 
         // Test invalid format
-        assert_eq!(parser.parse_duration("invalid"), None);
-        assert_eq!(parser.parse_duration(""), None);
+        assert_eq!(parser::parse_duration("invalid"), None);
+        assert_eq!(parser::parse_duration(""), None);
     }
 
     #[test]
     fn test_decode_xml_entities() {
         let encoded = "Artist &amp; Band &lt;Live&gt; &quot;Greatest Hits&quot;";
-        let decoded = XmlParser::decode_entities(encoded);
+        let decoded = crate::xml::parser::XmlParser::decode_entities(encoded);
         assert_eq!(decoded, "Artist & Band <Live> \"Greatest Hits\"");
     }
 
@@ -634,9 +631,8 @@ mod tests {
             </DIDL-Lite>
         "#;
 
-        let mut parser = XmlParser::new("");
-        let metadata = parser.extract_didl_metadata(didl_xml).unwrap();
-        
+        let metadata = parser::extract_didl_metadata(didl_xml).unwrap();
+
         assert_eq!(metadata.title, Some("Test Title".to_string()));
         assert_eq!(metadata.artist, Some("Test Creator".to_string()));
         assert_eq!(metadata.album, Some("Test Album".to_string()));

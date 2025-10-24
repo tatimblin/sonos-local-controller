@@ -1,16 +1,29 @@
-use super::{
-    error::XmlParseResult,
+use super::types::{XmlZoneGroupData, XmlZoneGroupMember, XmlZoneGroups};
+use crate::xml::{
+    error::{XmlParseError, XmlParseResult},
     parser::XmlParser,
-    types::{XmlZoneGroupData, XmlZoneGroupMember},
+    types::XmlProperty,
 };
 
-/// ZoneGroupTopology service-specific extensions for the XML parser
-impl<'a> XmlParser<'a> {
+/// ZoneGroupTopology service-specific parsing functions
+pub struct ZoneGroupTopologyParser;
+
+impl ZoneGroupTopologyParser {
+    /// Parse zone groups using serde
+    pub fn parse_zone_groups_serde(xml: &str) -> XmlParseResult<Vec<XmlZoneGroupData>> {
+        let decoded_xml = XmlParser::decode_entities(xml);
+
+        match serde_xml_rs::from_str::<XmlZoneGroups>(&decoded_xml) {
+            Ok(zone_groups) => Ok(zone_groups.zone_groups),
+            Err(e) => Err(XmlParseError::SyntaxError(format!(
+                "Serde XML error: {}",
+                e
+            ))),
+        }
+    }
+
     /// Parse zone group state from a UPnP event XML using serde
-    pub fn parse_zone_group_state_from_upnp_event(&mut self) -> XmlParseResult<Vec<XmlZoneGroupData>> {
-        let xml_content = std::str::from_utf8(self.reader.get_ref())
-            .map_err(|e| crate::xml::XmlParseError::SyntaxError(format!("Invalid UTF-8: {}", e)))?;
-        
+    pub fn parse_zone_group_state_from_upnp_event(xml_content: &str) -> XmlParseResult<Vec<XmlZoneGroupData>> {
         // Try to parse as property first
         if let Ok(property) = XmlParser::parse_property_serde(xml_content) {
             if let Some(zone_group_state_xml) = property.zone_group_state {
@@ -19,29 +32,49 @@ impl<'a> XmlParser<'a> {
                 }
                 
                 // Decode XML entities and parse zone groups
-                return XmlParser::parse_zone_groups_serde(&zone_group_state_xml);
+                return Self::parse_zone_groups_serde(&zone_group_state_xml);
             }
         }
         
         // Fallback: try to parse directly as zone groups
-        XmlParser::parse_zone_groups_serde(xml_content)
+        Self::parse_zone_groups_serde(xml_content)
     }
 
+    /// Parse zone group state using serde (simplified)
+    pub fn parse_zone_group_state(xml_content: &str) -> XmlParseResult<Vec<XmlZoneGroupData>> {
+        Self::parse_zone_groups_serde(xml_content)
+    }
+
+    /// Parse a single zone group member using serde
+    pub fn parse_zone_group_member(member_xml: &str) -> XmlParseResult<XmlZoneGroupMember> {
+        match serde_xml_rs::from_str::<XmlZoneGroupMember>(member_xml) {
+            Ok(member) => Ok(member),
+            Err(e) => Err(XmlParseError::SyntaxError(format!("Serde XML error: {}", e))),
+        }
+    }
+}
+
+/// ZoneGroupTopology service-specific extensions for the XML parser
+impl<'a> XmlParser<'a> {
+    /// Parse zone group state from a UPnP event XML using serde
+    pub fn parse_zone_group_state_from_upnp_event(&mut self) -> XmlParseResult<Vec<XmlZoneGroupData>> {
+        let xml_content = std::str::from_utf8(self.reader.get_ref())
+            .map_err(|e| XmlParseError::SyntaxError(format!("Invalid UTF-8: {}", e)))?;
+        
+        ZoneGroupTopologyParser::parse_zone_group_state_from_upnp_event(xml_content)
+    }
 
     /// Parse zone group state using serde (simplified)
     pub fn parse_zone_group_state(&mut self) -> XmlParseResult<Vec<XmlZoneGroupData>> {
         let xml_content = std::str::from_utf8(self.reader.get_ref())
-            .map_err(|e| super::error::XmlParseError::SyntaxError(format!("Invalid UTF-8: {}", e)))?;
+            .map_err(|e| XmlParseError::SyntaxError(format!("Invalid UTF-8: {}", e)))?;
         
-        XmlParser::parse_zone_groups_serde(xml_content)
+        ZoneGroupTopologyParser::parse_zone_group_state(xml_content)
     }
 
     /// Parse a single zone group member using serde
     pub fn parse_zone_group_member(&mut self, member_xml: &str) -> XmlParseResult<XmlZoneGroupMember> {
-        match serde_xml_rs::from_str::<XmlZoneGroupMember>(member_xml) {
-            Ok(member) => Ok(member),
-            Err(e) => Err(super::error::XmlParseError::SyntaxError(format!("Serde XML error: {}", e))),
-        }
+        ZoneGroupTopologyParser::parse_zone_group_member(member_xml)
     }
 }
 
@@ -58,8 +91,7 @@ mod tests {
                 </ZoneGroup>
             </ZoneGroups>
         "#;
-        let mut parser = XmlParser::new(xml);
-        let result = parser.parse_zone_group_state().unwrap();
+        let result = ZoneGroupTopologyParser::parse_zone_group_state(xml).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].coordinator, "RINCON_123456789");
         assert_eq!(result[0].members.len(), 1);
@@ -78,8 +110,7 @@ mod tests {
                 </ZoneGroup>
             </ZoneGroups>
         "#;
-        let mut parser = XmlParser::new(xml);
-        let result = parser.parse_zone_group_state().unwrap();
+        let result = ZoneGroupTopologyParser::parse_zone_group_state(xml).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].coordinator, "RINCON_123456789");
         assert_eq!(result[1].coordinator, "RINCON_987654321");
@@ -97,8 +128,7 @@ mod tests {
                 </ZoneGroup>
             </ZoneGroups>
         "#;
-        let mut parser = XmlParser::new(xml);
-        let result = parser.parse_zone_group_state().unwrap();
+        let result = ZoneGroupTopologyParser::parse_zone_group_state(xml).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].coordinator, "RINCON_123456789");
         assert_eq!(result[0].members.len(), 1);
@@ -111,8 +141,7 @@ mod tests {
     #[test]
     fn test_parse_zone_group_member() {
         let member_xml = r#"<ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" />"#;
-        let mut parser = XmlParser::new("");
-        let result = parser.parse_zone_group_member(member_xml).unwrap();
+        let result = ZoneGroupTopologyParser::parse_zone_group_member(member_xml).unwrap();
         assert_eq!(result.uuid, "RINCON_123456789");
         assert_eq!(result.satellites().len(), 0);
     }
@@ -120,8 +149,7 @@ mod tests {
     #[test]
     fn test_parse_zone_group_state_empty() {
         let xml = r#"<ZoneGroups></ZoneGroups>"#;
-        let mut parser = XmlParser::new(xml);
-        let result = parser.parse_zone_group_state().unwrap();
+        let result = ZoneGroupTopologyParser::parse_zone_group_state(xml).unwrap();
         assert_eq!(result.len(), 0);
     }
 
@@ -135,8 +163,7 @@ mod tests {
                 </ZoneGroup>
             </ZoneGroups>
         "#;
-        let mut parser = XmlParser::new(xml);
-        let result = parser.parse_zone_group_state().unwrap();
+        let result = ZoneGroupTopologyParser::parse_zone_group_state(xml).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].coordinator, "RINCON_123456789");
         assert_eq!(result[0].members.len(), 2);
