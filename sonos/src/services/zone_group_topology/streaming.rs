@@ -1,7 +1,7 @@
 use super::types::XmlZoneGroupData;
-use crate::streaming::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
-use crate::streaming::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use crate::models::{Group, GroupId, Speaker, SpeakerId, StateChange};
+use crate::streaming::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
+use crate::streaming::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -225,17 +225,26 @@ impl ZoneGroupTopologySubscription {
 
         let mut groups = Vec::new();
 
-        // Use XML parser to parse zone group state from UPnP event in one call
-        match super::parser::ZoneGroupTopologyParser::parse_zone_group_state_from_upnp_event(xml) {
-            Ok(xml_groups) => {
-                if xml_groups.is_empty() {
-                    println!("ℹ️ No zone groups found in UPnP event");
-                } else {
-                    println!("✅ Found {} zone groups in UPnP event", xml_groups.len());
-                }
+        // Use the new ZoneGroupTopologyParser to parse zone group state from UPnP event
+        match crate::services::zone_group_topology::parser::ZoneGroupTopologyParser::from_xml(xml) {
+            Ok(parser) => {
+                match parser.zone_groups() {
+                    Some(zone_groups) => {
+                        if zone_groups.is_empty() {
+                            println!("ℹ️ No zone groups found in UPnP event");
+                        } else {
+                            println!("✅ Found {} zone groups in UPnP event", zone_groups.len());
+                        }
 
-                // Convert XML data structures to domain models
-                groups = self.convert_xml_groups_to_domain_models(xml_groups)?;
+                        // Convert new parser data structures to domain models
+                        groups = self.convert_new_parser_groups_to_domain_models(zone_groups)?;
+                    }
+                    None => {
+                        println!("ℹ️ Parser returned None for zone_groups()");
+                        // Return empty groups list
+                        groups = Vec::new();
+                    }
+                }
             }
             Err(e) => {
                 return Err(SubscriptionError::EventParseError(format!(
@@ -281,6 +290,71 @@ impl ZoneGroupTopologySubscription {
                 // Convert satellite UUIDs to SpeakerIds
                 let satellites: Vec<SpeakerId> = xml_member
                     .satellites()
+                    .iter()
+                    .filter(|uuid| !uuid.trim().is_empty())
+                    .map(|uuid| SpeakerId::from_udn(&format!("uuid:{}", uuid)))
+                    .collect();
+
+                let satellite_count = satellites.len();
+                group.add_member_with_satellites(speaker_id, satellites);
+
+                if satellite_count == 0 {
+                    println!("✅ Added member {:?} to group", speaker_id);
+                } else {
+                    println!(
+                        "✅ Added member {:?} with {} satellites to group",
+                        speaker_id, satellite_count
+                    );
+                }
+            }
+
+            if group.member_count() == 0 {
+                println!("⚠️ ZoneGroup has no valid members, skipping");
+                continue;
+            }
+
+            println!(
+                "✅ Successfully converted ZoneGroup with {} members",
+                group.member_count()
+            );
+            groups.push(group);
+        }
+
+        Ok(groups)
+    }
+
+    /// Convert new parser zone group data structures to domain models
+    fn convert_new_parser_groups_to_domain_models(
+        &self,
+        zone_groups: Vec<crate::services::zone_group_topology::parser::ZoneGroupInfo>,
+    ) -> SubscriptionResult<Vec<Group>> {
+        let mut groups = Vec::new();
+
+        for zone_group in zone_groups {
+            if zone_group.coordinator.trim().is_empty() {
+                println!("⚠️ Skipping group with empty coordinator");
+                continue;
+            }
+
+            let coordinator_id = SpeakerId::from_udn(&format!("uuid:{}", zone_group.coordinator));
+            let mut group = Group::new(coordinator_id);
+
+            println!(
+                "🔍 Converting new parser group with coordinator: {}",
+                zone_group.coordinator
+            );
+
+            for member in zone_group.members {
+                if member.uuid.trim().is_empty() {
+                    println!("⚠️ Skipping member with empty UUID");
+                    continue;
+                }
+
+                let speaker_id = SpeakerId::from_udn(&format!("uuid:{}", member.uuid));
+
+                // Convert satellite UUIDs to SpeakerIds
+                let satellites: Vec<SpeakerId> = member
+                    .satellites
                     .iter()
                     .filter(|uuid| !uuid.trim().is_empty())
                     .map(|uuid| SpeakerId::from_udn(&format!("uuid:{}", uuid)))
@@ -600,8 +674,7 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
         Ok(())
     }
 }
-#[cfg(test)
-]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::Speaker;
@@ -647,7 +720,9 @@ mod tests {
         let member_xml = r#"<ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" />"#;
 
         // Use XML parser directly
-        let result = crate::services::zone_group_topology::parser::ZoneGroupTopologyParser::parse_zone_group_member(member_xml).unwrap();
+        let result =
+            crate::services::zone_group_topology::parser::parse_zone_group_member(member_xml)
+                .unwrap();
 
         assert_eq!(result.uuid, "RINCON_123456789");
         assert_eq!(result.satellites().len(), 0); // No satellites in this test
@@ -795,7 +870,7 @@ mod tests {
 
         let result = subscription.parse_zone_group_state("");
         assert!(result.is_err());
-        
+
         if let Err(SubscriptionError::EventParseError(msg)) = result {
             assert_eq!(msg, "Empty XML content");
         } else {

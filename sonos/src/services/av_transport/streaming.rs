@@ -227,21 +227,21 @@ impl AVTransportSubscription {
     /// Parse current track information from UPnP event XML
     fn parse_current_track_info(&self, xml: &str) -> SubscriptionResult<Option<TrackInfo>> {
         // Use XML parser to extract all AVTransport data
-        match parser::parse_av_transport_event(xml) {
+        match parser::AVTransportParser::from_xml(xml) {
             Ok(av_data) => {
                 let mut title = None;
                 let mut artist = None;
                 let mut album = None;
 
                 // Extract metadata if available
-                if let Some(metadata) = av_data.current_track_metadata {
+                if let Some(metadata) = av_data.current_track_metadata() {
                     title = metadata.title;
                     artist = metadata.artist;
                     album = metadata.album;
                 }
 
                 // Parse duration using XML parser helper (convert seconds to milliseconds)
-                let duration_ms = av_data.current_track_duration.and_then(|duration_str| {
+                let duration_ms = av_data.current_track_duration().and_then(|duration_str| {
                     if duration_str.is_empty() || duration_str == "NOT_IMPLEMENTED" {
                         None
                     } else {
@@ -250,7 +250,7 @@ impl AVTransportSubscription {
                 });
 
                 // Get URI
-                let uri = av_data.current_track_uri;
+                let uri = av_data.current_track_uri();
 
                 // Only return TrackInfo if we have at least some information
                 if title.is_some() || artist.is_some() || album.is_some() || uri.is_some() {
@@ -329,24 +329,102 @@ impl ServiceSubscription for AVTransportSubscription {
     fn parse_event(&self, event_xml: &str) -> SubscriptionResult<Vec<StateChange>> {
         let mut changes = Vec::new();
 
-        // Parse transport state changes
-        if let Some(playback_state) = self.parse_transport_state(event_xml)? {
-            changes.push(StateChange::PlaybackStateChanged {
-                speaker_id: self.speaker.id,
-                state: playback_state,
-            });
-        }
 
-        // Parse track information changes
-        if let Some(track_info) = self.parse_current_track_info(event_xml)? {
-            changes.push(StateChange::TrackChanged {
-                speaker_id: self.speaker.id,
-                track_info: Some(track_info),
-            });
+        
+        // Parse the XML once and extract both transport state and track info
+        match parser::AVTransportParser::from_xml(event_xml) {
+            Ok(av_data) => {
+
+                
+                // Handle transport state changes
+                if let Some(transport_state_str) = av_data.transport_state() {
+                    let playback_state = match transport_state_str.as_str() {
+                        "PLAYING" => Some(crate::models::PlaybackState::Playing),
+                        "PAUSED_PLAYBACK" => Some(crate::models::PlaybackState::Paused),
+                        "STOPPED" => Some(crate::models::PlaybackState::Stopped),
+                        "TRANSITIONING" => Some(crate::models::PlaybackState::Transitioning),
+                        _ => {
+                            println!("⚠️  Unknown transport state: {}", transport_state_str);
+                            None
+                        }
+                    };
+
+                    if let Some(state) = playback_state {
+                        println!("🎯 StateChange for speaker: {} (ID: {:?}) -> {:?}", 
+                                 self.speaker.room_name, self.speaker.id, state);
+                        changes.push(StateChange::PlaybackStateChanged {
+                            speaker_id: self.speaker.id,
+                            state,
+                        });
+                    }
+                }
+
+                // Handle track information changes
+                let mut title = None;
+                let mut artist = None;
+                let mut album = None;
+
+                // Extract metadata if available
+                if let Some(metadata) = av_data.current_track_metadata() {
+                    title = metadata.title;
+                    artist = metadata.artist;
+                    album = metadata.album;
+                }
+
+                // Parse duration (convert seconds to milliseconds)
+                let duration_ms = av_data.current_track_duration().and_then(|duration_str| {
+                    if duration_str.is_empty() || duration_str == "NOT_IMPLEMENTED" {
+                        None
+                    } else {
+                        parser::parse_duration(&duration_str).map(|seconds| seconds * 1000)
+                    }
+                });
+
+                // Get URI
+                let uri = av_data.current_track_uri();
+
+                // Only create TrackChanged event if we have at least some information
+                if title.is_some() || artist.is_some() || album.is_some() || uri.is_some() {
+                    let track_info = crate::models::TrackInfo {
+                        title,
+                        artist,
+                        album,
+                        duration_ms,
+                        uri,
+                    };
+
+                    changes.push(StateChange::TrackChanged {
+                        speaker_id: self.speaker.id,
+                        track_info: Some(track_info),
+                    });
+                }
+            }
+            Err(e) => {
+                println!("❌ XML parsing error in parse_event: {}", e);
+                println!("🔍 Saving problematic XML to file for debugging...");
+                
+                // Save the problematic XML to a file for analysis
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let filename = format!("problematic_xml_{}.xml", timestamp);
+                
+                if let Err(write_err) = std::fs::write(&filename, event_xml) {
+                    println!("❌ Failed to write XML to file: {}", write_err);
+                } else {
+                    println!("✅ Saved problematic XML to: {}", filename);
+                }
+                
+                // Don't return error - just log it and continue with empty changes
+                // This allows the system to continue working even if some events fail to parse
+            }
         }
 
         Ok(changes)
     }
+
+
 
     fn is_active(&self) -> bool {
         self.active
@@ -633,9 +711,9 @@ mod tests {
 
         let metadata = parser::extract_didl_metadata(didl_xml).unwrap();
 
-        assert_eq!(metadata.title, Some("Test Title".to_string()));
-        assert_eq!(metadata.artist, Some("Test Creator".to_string()));
-        assert_eq!(metadata.album, Some("Test Album".to_string()));
+        assert_eq!(metadata.item.title, Some("Test Title".to_string()));
+        assert_eq!(metadata.item.creator, Some("Test Creator".to_string()));
+        assert_eq!(metadata.item.album, Some("Test Album".to_string()));
     }
 
     #[test]

@@ -85,7 +85,7 @@ impl EventStreamBuilder {
 
         Ok(Self {
             speakers,
-            services: vec![ServiceType::AVTransport], // Default to basic playback events
+            services: vec![ServiceType::ZoneGroupTopology], // Default to basic playback events
             state_cache: None,
             event_handlers: Vec::new(),
             lifecycle_handlers: LifecycleHandlers::default(),

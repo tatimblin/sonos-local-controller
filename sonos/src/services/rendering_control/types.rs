@@ -20,10 +20,10 @@ pub struct XmlLastChangeEvent {
 pub struct XmlInstanceId {
     #[serde(rename = "@val")]
     pub val: Option<String>,
-    #[serde(rename = "Volume")]
-    pub volume: Option<XmlValueAttribute>,
-    #[serde(rename = "Mute")]
-    pub mute: Option<XmlValueAttribute>,
+    #[serde(rename = "Volume", default)]
+    pub volume: Vec<XmlVolumeChannel>,
+    #[serde(rename = "Mute", default)]
+    pub mute: Vec<XmlMuteChannel>,
     #[serde(rename = "TransportState")]
     pub transport_state: Option<XmlValueAttribute>,
     #[serde(rename = "CurrentTrackMetaData")]
@@ -37,6 +37,24 @@ pub struct XmlInstanceId {
 /// Generic structure for elements with val attribute
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct XmlValueAttribute {
+    #[serde(rename = "@val")]
+    pub val: String,
+}
+
+/// Volume channel structure with channel and val attributes
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct XmlVolumeChannel {
+    #[serde(rename = "@channel")]
+    pub channel: String,
+    #[serde(rename = "@val")]
+    pub val: String,
+}
+
+/// Mute channel structure with channel and val attributes
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct XmlMuteChannel {
+    #[serde(rename = "@channel")]
+    pub channel: String,
     #[serde(rename = "@val")]
     pub val: String,
 }
@@ -88,15 +106,21 @@ mod tests {
     fn test_xml_instance_id() {
         let instance_id = XmlInstanceId {
             val: Some("0".to_string()),
-            volume: Some(XmlValueAttribute { val: "50".to_string() }),
-            mute: Some(XmlValueAttribute { val: "0".to_string() }),
+            volume: vec![XmlVolumeChannel { 
+                channel: "Master".to_string(), 
+                val: "50".to_string() 
+            }],
+            mute: vec![XmlMuteChannel { 
+                channel: "Master".to_string(), 
+                val: "0".to_string() 
+            }],
             transport_state: None,
             current_track_metadata: None,
             current_track_duration: None,
             current_track_uri: None,
         };
         assert_eq!(instance_id.val, Some("0".to_string()));
-        assert!(instance_id.volume.is_some());
-        assert!(instance_id.mute.is_some());
+        assert!(!instance_id.volume.is_empty());
+        assert!(!instance_id.mute.is_empty());
     }
 }

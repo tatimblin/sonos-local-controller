@@ -212,7 +212,7 @@ impl RenderingControlSubscription {
             Err(xml_error) => {
                 println!("⚠️  XML parsing error: {}", xml_error);
                 // Convert XML parse error to subscription error
-                Err(xml_error.into())
+                Err(SubscriptionError::XmlParseError(xml_error.to_string()))
             }
         }
     }
@@ -234,7 +234,7 @@ impl RenderingControlSubscription {
             Err(xml_error) => {
                 println!("⚠️  XML parsing error: {}", xml_error);
                 // Convert XML parse error to subscription error
-                Err(xml_error.into())
+                Err(SubscriptionError::XmlParseError(xml_error.to_string()))
             }
         }
     }

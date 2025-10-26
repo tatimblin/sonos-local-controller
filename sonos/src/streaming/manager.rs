@@ -4,9 +4,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc as tokio_mpsc;
 
-use super::av_transport::AVTransportSubscription;
 use super::callback_server::CallbackServer;
-use super::rendering_control::RenderingControlSubscription;
+use crate::services::av_transport::streaming::AVTransportSubscription;
+use crate::services::rendering_control::streaming::RenderingControlSubscription;
 use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
 use super::types::{RawEvent, ServiceType, StreamConfig, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use crate::models::{Speaker, SpeakerId, StateChange};
@@ -789,7 +789,7 @@ impl SubscriptionManager {
             ServiceType::ZoneGroupTopology => {
                 // Simplified ZoneGroupTopology subscription - just use the current speaker
                 // No complex network speaker management needed
-                use super::zone_group_topology::ZoneGroupTopologySubscription;
+                use crate::services::zone_group_topology::streaming::ZoneGroupTopologySubscription;
                 Box::new(ZoneGroupTopologySubscription::new(
                     speaker.clone(),
                     callback_url,

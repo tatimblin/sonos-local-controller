@@ -1,50 +1,28 @@
-use crate::streaming::subscription::SubscriptionError;
+use crate::error::SonosError;
 
-/// Result type for XML parsing operations
-pub type XmlParseResult<T> = Result<T, XmlParseError>;
-
-/// Comprehensive error type for XML parsing failures
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug)]
 pub enum XmlParseError {
-    #[error("XML syntax error: {0}")]
     SyntaxError(String),
-
-    #[error("Missing required element: {element}")]
-    MissingElement { element: String },
-
-    #[error("Missing required attribute: {attribute} in element: {element}")]
-    MissingAttribute { element: String, attribute: String },
-
-    #[error("Invalid XML structure: {0}")]
-    InvalidStructure(String),
-
-    #[error("Entity decoding failed: {0}")]
-    EntityDecodingError(String),
-
-    #[error("IO error during parsing: {0}")]
-    IoError(String),
+    InvalidFormat(String),
+    MissingElement(String),
 }
 
-/// Convert from quick_xml::Error to XmlParseError
-impl From<quick_xml::Error> for XmlParseError {
-    fn from(error: quick_xml::Error) -> Self {
-        match error {
-            quick_xml::Error::Io(io_error) => XmlParseError::IoError(io_error.to_string()),
-            _ => XmlParseError::SyntaxError(error.to_string()),
+impl std::fmt::Display for XmlParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            XmlParseError::SyntaxError(msg) => write!(f, "XML syntax error: {}", msg),
+            XmlParseError::InvalidFormat(msg) => write!(f, "Invalid XML format: {}", msg),
+            XmlParseError::MissingElement(msg) => write!(f, "Missing XML element: {}", msg),
         }
     }
 }
 
-/// Convert from quick_xml::events::attributes::AttrError to XmlParseError
-impl From<quick_xml::events::attributes::AttrError> for XmlParseError {
-    fn from(error: quick_xml::events::attributes::AttrError) -> Self {
-        XmlParseError::SyntaxError(error.to_string())
+impl std::error::Error for XmlParseError {}
+
+impl From<XmlParseError> for SonosError {
+    fn from(err: XmlParseError) -> Self {
+        SonosError::ParseError(err.to_string())
     }
 }
 
-/// Convert from XmlParseError to SubscriptionError
-impl From<XmlParseError> for SubscriptionError {
-    fn from(error: XmlParseError) -> Self {
-        SubscriptionError::XmlParseError(error.to_string())
-    }
-}
+pub type XmlParseResult<T> = std::result::Result<T, XmlParseError>;

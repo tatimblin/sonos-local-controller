@@ -1,80 +1,290 @@
-use super::types::{XmlZoneGroupData, XmlZoneGroupMember, XmlZoneGroups};
-use crate::xml::{
-    error::{XmlParseError, XmlParseResult},
-    parser::XmlParser,
-    types::XmlProperty,
-};
+use crate::error::{Result, SonosError};
+use serde::Deserialize;
 
-/// ZoneGroupTopology service-specific parsing functions
-pub struct ZoneGroupTopologyParser;
+/// Simple interface for parsing Zone Group Topology XML data
+pub struct ZoneGroupTopologyParser {
+    property_set: Option<ZoneGroupTopologyPropertySet>,
+}
+
+/// Zone group information
+#[derive(Debug, Clone)]
+pub struct ZoneGroupInfo {
+    pub coordinator: String,
+    pub id: String,
+    pub members: Vec<ZoneGroupMemberInfo>,
+}
+
+/// Zone group member information
+#[derive(Debug, Clone)]
+pub struct ZoneGroupMemberInfo {
+    pub uuid: String,
+    pub location: String,
+    pub zone_name: String,
+    pub satellites: Vec<String>,
+}
+
+/// UPnP PropertySet - internal XML mapping
+#[derive(Debug, Deserialize)]
+struct ZoneGroupTopologyPropertySet {
+    #[serde(rename = "property")]
+    property: ZoneGroupTopologyProperty,
+}
+
+/// UPnP Property containing ZoneGroupState or direct elements - internal XML mapping
+#[derive(Debug, Deserialize)]
+struct ZoneGroupTopologyProperty {
+    #[serde(rename = "ZoneGroupState", default)]
+    zone_group_state: Option<String>,
+}
 
 impl ZoneGroupTopologyParser {
-    /// Parse zone groups using serde
-    pub fn parse_zone_groups_serde(xml: &str) -> XmlParseResult<Vec<XmlZoneGroupData>> {
-        let decoded_xml = XmlParser::decode_entities(xml);
+    /// Create a new parser from XML string
+    pub fn from_xml(xml: &str) -> Result<Self> {
+        let cleaned_xml = xml
+            .replace("e:propertyset", "propertyset")
+            .replace("e:property", "property");
 
-        match serde_xml_rs::from_str::<XmlZoneGroups>(&decoded_xml) {
-            Ok(zone_groups) => Ok(zone_groups.zone_groups),
-            Err(e) => Err(XmlParseError::SyntaxError(format!(
-                "Serde XML error: {}",
-                e
-            ))),
-        }
+        let property_set = serde_xml_rs::from_str(&cleaned_xml)
+            .map_err(|e| SonosError::ParseError(format!("PropertySet parse error: {}", e)))?;
+
+        Ok(Self {
+            property_set: Some(property_set),
+        })
     }
 
-    /// Parse zone group state from a UPnP event XML using serde
-    pub fn parse_zone_group_state_from_upnp_event(xml_content: &str) -> XmlParseResult<Vec<XmlZoneGroupData>> {
-        // Try to parse as property first
-        if let Ok(property) = XmlParser::parse_property_serde(xml_content) {
-            if let Some(zone_group_state_xml) = property.zone_group_state {
-                if zone_group_state_xml.trim().is_empty() {
-                    return Ok(Vec::new());
-                }
-                
-                // Decode XML entities and parse zone groups
-                return Self::parse_zone_groups_serde(&zone_group_state_xml);
+    /// Get the zone groups from the parsed XML
+    pub fn zone_groups(&self) -> Option<Vec<ZoneGroupInfo>> {
+        let property_set = self.property_set.as_ref()?;
+
+        // Check ZoneGroupState property
+        if let Some(zone_group_state_xml) = &property_set.property.zone_group_state {
+            if zone_group_state_xml.trim().is_empty() {
+                return Some(Vec::new());
             }
-        }
-        
-        // Fallback: try to parse directly as zone groups
-        Self::parse_zone_groups_serde(xml_content)
-    }
 
-    /// Parse zone group state using serde (simplified)
-    pub fn parse_zone_group_state(xml_content: &str) -> XmlParseResult<Vec<XmlZoneGroupData>> {
-        Self::parse_zone_groups_serde(xml_content)
-    }
-
-    /// Parse a single zone group member using serde
-    pub fn parse_zone_group_member(member_xml: &str) -> XmlParseResult<XmlZoneGroupMember> {
-        match serde_xml_rs::from_str::<XmlZoneGroupMember>(member_xml) {
-            Ok(member) => Ok(member),
-            Err(e) => Err(XmlParseError::SyntaxError(format!("Serde XML error: {}", e))),
+            // Decode XML entities and parse manually
+            let decoded_xml = decode_html_entities(zone_group_state_xml);
+            
+            // Use manual parsing to extract zone group information
+            match parse_zone_groups_manually(&decoded_xml) {
+                Ok(zone_groups) => Some(zone_groups),
+                Err(_) => Some(Vec::new()), // Return empty list on parse error
+            }
+        } else {
+            None
         }
     }
 }
 
-/// ZoneGroupTopology service-specific extensions for the XML parser
-impl<'a> XmlParser<'a> {
-    /// Parse zone group state from a UPnP event XML using serde
-    pub fn parse_zone_group_state_from_upnp_event(&mut self) -> XmlParseResult<Vec<XmlZoneGroupData>> {
-        let xml_content = std::str::from_utf8(self.reader.get_ref())
-            .map_err(|e| XmlParseError::SyntaxError(format!("Invalid UTF-8: {}", e)))?;
+// Helper functions (internal)
+fn parse_zone_groups_manually(xml: &str) -> Result<Vec<ZoneGroupInfo>> {
+    // Try to parse as ZoneGroupState first (with wrapper)
+    if let Ok(zone_group_state) = serde_xml_rs::from_str::<ZoneGroupStateWrapper>(xml) {
+        return Ok(convert_to_zone_group_info(zone_group_state.zone_groups.zone_groups));
+    }
+    
+    // Fallback: try to parse directly as ZoneGroups
+    match serde_xml_rs::from_str::<ZoneGroupsWrapper>(xml) {
+        Ok(zone_groups) => Ok(convert_to_zone_group_info(zone_groups.zone_groups)),
+        Err(e) => Err(SonosError::ParseError(format!("Serde XML error: {}", e))),
+    }
+}
+
+fn convert_to_zone_group_info(zone_groups: Vec<ZoneGroupSerde>) -> Vec<ZoneGroupInfo> {
+    zone_groups
+        .into_iter()
+        .filter_map(|group| {
+            let coordinator = group.coordinator?;
+            let coordinator_clone = coordinator.clone();
+            Some(ZoneGroupInfo {
+                coordinator,
+                id: group.id.unwrap_or_else(|| format!("{}:1", coordinator_clone)),
+            members: group
+                .members
+                .into_iter()
+                .map(|member| {
+                    let mut satellites = Vec::new();
+                    
+                    // Add satellites from attribute (comma-separated)
+                    if let Some(ref attr) = member.satellites_attr {
+                        for uuid in attr.split(',') {
+                            let uuid = uuid.trim();
+                            if !uuid.is_empty() {
+                                satellites.push(uuid.to_string());
+                            }
+                        }
+                    }
+                    
+                    // Add satellites from nested elements
+                    for satellite in member.satellite_elements {
+                        if let Some(uuid) = satellite.uuid {
+                            satellites.push(uuid);
+                        }
+                    }
+                    
+                    ZoneGroupMemberInfo {
+                        uuid: member.uuid.unwrap_or_default(),
+                        location: member.location.unwrap_or_default(),
+                        zone_name: member.zone_name.unwrap_or_default(),
+                        satellites,
+                    }
+                })
+                .collect(),
+            })
+        })
+        .collect()
+}
+
+// Internal XML structures for serde parsing
+#[derive(Debug, Deserialize)]
+struct ZoneGroupStateWrapper {
+    #[serde(rename = "ZoneGroups")]
+    zone_groups: ZoneGroupsWrapper,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZoneGroupsWrapper {
+    #[serde(rename = "ZoneGroup", default)]
+    zone_groups: Vec<ZoneGroupSerde>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZoneGroupSerde {
+    #[serde(rename = "@Coordinator")]
+    coordinator: Option<String>,
+    #[serde(rename = "@ID")]
+    id: Option<String>,
+    #[serde(rename = "ZoneGroupMember", default)]
+    members: Vec<ZoneGroupMemberSerde>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZoneGroupMemberSerde {
+    #[serde(rename = "@UUID", default)]
+    uuid: Option<String>,
+    #[serde(rename = "@Location", default)]
+    location: Option<String>,
+    #[serde(rename = "@ZoneName", default)]
+    zone_name: Option<String>,
+    #[serde(rename = "@Satellites", default)]
+    satellites_attr: Option<String>,
+    #[serde(rename = "Satellite", default)]
+    satellite_elements: Vec<SatelliteSerde>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SatelliteSerde {
+    #[serde(rename = "@UUID", default)]
+    uuid: Option<String>,
+}
+
+fn parse_zone_group_state_from_upnp_event_internal(xml_content: &str) -> Result<Vec<super::types::XmlZoneGroupData>> {
+    // Use manual parsing and convert to legacy format
+    let decoded_xml = decode_html_entities(xml_content);
+    let zone_groups = parse_zone_groups_manually(&decoded_xml)?;
+    
+    // Convert to legacy format
+    let legacy_groups = zone_groups
+        .into_iter()
+        .map(|group| super::types::XmlZoneGroupData {
+            coordinator: group.coordinator,
+            members: group
+                .members
+                .into_iter()
+                .map(|member| super::types::XmlZoneGroupMember {
+                    uuid: member.uuid,
+                    satellites_attr: if member.satellites.is_empty() {
+                        None
+                    } else {
+                        Some(member.satellites.join(","))
+                    },
+                    satellite_elements: member
+                        .satellites
+                        .into_iter()
+                        .map(|uuid| super::types::XmlSatellite { uuid })
+                        .collect(),
+                })
+                .collect(),
+        })
+        .collect();
+    
+    Ok(legacy_groups)
+}
+
+// Public helper functions
+
+/// Parse zone group state from a UPnP event XML (legacy function for backward compatibility)
+pub fn parse_zone_group_state_from_upnp_event(xml_content: &str) -> Result<Vec<super::types::XmlZoneGroupData>> {
+    let parser = ZoneGroupTopologyParser::from_xml(xml_content)?;
+    
+    if let Some(zone_groups) = parser.zone_groups() {
+        // Convert to legacy format
+        let legacy_groups = zone_groups
+            .into_iter()
+            .map(|group| super::types::XmlZoneGroupData {
+                coordinator: group.coordinator,
+                members: group
+                    .members
+                    .into_iter()
+                    .map(|member| super::types::XmlZoneGroupMember {
+                        uuid: member.uuid,
+                        satellites_attr: if member.satellites.is_empty() {
+                            None
+                        } else {
+                            Some(member.satellites.join(","))
+                        },
+                        satellite_elements: member
+                            .satellites
+                            .into_iter()
+                            .map(|uuid| super::types::XmlSatellite { uuid })
+                            .collect(),
+                    })
+                    .collect(),
+            })
+            .collect();
         
-        ZoneGroupTopologyParser::parse_zone_group_state_from_upnp_event(xml_content)
+        Ok(legacy_groups)
+    } else {
+        // Try fallback parsing for direct zone groups XML
+        let decoded_xml = decode_html_entities(xml_content);
+        match serde_xml_rs::from_str::<super::types::XmlZoneGroups>(&decoded_xml) {
+            Ok(zone_groups) => Ok(zone_groups.zone_groups),
+            Err(e) => Err(SonosError::ParseError(format!("Serde XML error: {}", e))),
+        }
+    }
+}
+
+/// Parse a single zone group member (legacy function for backward compatibility)
+pub fn parse_zone_group_member(member_xml: &str) -> Result<super::types::XmlZoneGroupMember> {
+    match serde_xml_rs::from_str::<super::types::XmlZoneGroupMember>(member_xml) {
+        Ok(member) => Ok(member),
+        Err(e) => Err(SonosError::ParseError(format!("Serde XML error: {}", e))),
+    }
+}
+
+// Internal helper functions
+fn decode_html_entities(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+}
+
+/// ZoneGroupTopology service-specific parsing functions (legacy struct for backward compatibility)
+pub struct ZoneGroupTopologyParserLegacy;
+
+impl ZoneGroupTopologyParserLegacy {
+    /// Parse zone group state from a UPnP event XML using serde (legacy method)
+    pub fn parse_zone_group_state_from_upnp_event(
+        xml_content: &str,
+    ) -> Result<Vec<super::types::XmlZoneGroupData>> {
+        parse_zone_group_state_from_upnp_event(xml_content)
     }
 
-    /// Parse zone group state using serde (simplified)
-    pub fn parse_zone_group_state(&mut self) -> XmlParseResult<Vec<XmlZoneGroupData>> {
-        let xml_content = std::str::from_utf8(self.reader.get_ref())
-            .map_err(|e| XmlParseError::SyntaxError(format!("Invalid UTF-8: {}", e)))?;
-        
-        ZoneGroupTopologyParser::parse_zone_group_state(xml_content)
-    }
-
-    /// Parse a single zone group member using serde
-    pub fn parse_zone_group_member(&mut self, member_xml: &str) -> XmlParseResult<XmlZoneGroupMember> {
-        ZoneGroupTopologyParser::parse_zone_group_member(member_xml)
+    /// Parse a single zone group member using serde (legacy method)
+    pub fn parse_zone_group_member(member_xml: &str) -> Result<super::types::XmlZoneGroupMember> {
+        parse_zone_group_member(member_xml)
     }
 }
 
@@ -83,15 +293,193 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_zone_group_state_single_group() {
+    fn test_parser_from_xml_with_zone_group_state() {
         let xml = r#"
-            <ZoneGroups>
-                <ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1">
-                    <ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" />
-                </ZoneGroup>
-            </ZoneGroups>
+            <propertyset>
+                <property>
+                    <ZoneGroupState>&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1"&gt;&lt;ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" /&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;</ZoneGroupState>
+                </property>
+            </propertyset>
         "#;
-        let result = ZoneGroupTopologyParser::parse_zone_group_state(xml).unwrap();
+
+        let parser = ZoneGroupTopologyParser::from_xml(xml).unwrap();
+        let zone_groups = parser.zone_groups().unwrap();
+
+        assert_eq!(zone_groups.len(), 1);
+        assert_eq!(zone_groups[0].coordinator, "RINCON_123456789");
+        assert_eq!(zone_groups[0].id, "RINCON_123456789:1");
+        assert_eq!(zone_groups[0].members.len(), 1);
+        assert_eq!(zone_groups[0].members[0].uuid, "RINCON_123456789");
+        assert_eq!(zone_groups[0].members[0].satellites.len(), 0);
+    }
+
+    #[test]
+    fn test_parser_from_xml_with_multiple_groups() {
+        let xml = r#"
+            <propertyset>
+                <property>
+                    <ZoneGroupState>&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1"&gt;&lt;ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" /&gt;&lt;/ZoneGroup&gt;&lt;ZoneGroup Coordinator="RINCON_987654321" ID="RINCON_987654321:1"&gt;&lt;ZoneGroupMember UUID="RINCON_987654321" Location="http://192.168.1.101:1400/xml/device_description.xml" ZoneName="Kitchen" /&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;</ZoneGroupState>
+                </property>
+            </propertyset>
+        "#;
+
+        let parser = ZoneGroupTopologyParser::from_xml(xml).unwrap();
+        let zone_groups = parser.zone_groups().unwrap();
+
+        assert_eq!(zone_groups.len(), 2);
+        assert_eq!(zone_groups[0].coordinator, "RINCON_123456789");
+        assert_eq!(zone_groups[1].coordinator, "RINCON_987654321");
+        assert_eq!(zone_groups[0].members[0].zone_name, "Living Room");
+        assert_eq!(zone_groups[1].members[0].zone_name, "Kitchen");
+    }
+
+    #[test]
+    fn test_parser_from_xml_with_satellites() {
+        let xml = r#"
+            <propertyset>
+                <property>
+                    <ZoneGroupState>&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1"&gt;&lt;ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room"&gt;&lt;Satellite UUID="RINCON_111111111" /&gt;&lt;Satellite UUID="RINCON_222222222" /&gt;&lt;/ZoneGroupMember&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;</ZoneGroupState>
+                </property>
+            </propertyset>
+        "#;
+
+        let parser = ZoneGroupTopologyParser::from_xml(xml).unwrap();
+        let zone_groups = parser.zone_groups().unwrap();
+
+        assert_eq!(zone_groups.len(), 1);
+        assert_eq!(zone_groups[0].members.len(), 1);
+        assert_eq!(zone_groups[0].members[0].satellites.len(), 2);
+        assert_eq!(zone_groups[0].members[0].satellites[0], "RINCON_111111111");
+        assert_eq!(zone_groups[0].members[0].satellites[1], "RINCON_222222222");
+    }
+
+    #[test]
+    fn test_parser_from_xml_with_satellites_attribute() {
+        let xml = r#"
+            <propertyset>
+                <property>
+                    <ZoneGroupState>&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1"&gt;&lt;ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" Satellites="RINCON_111111111,RINCON_222222222" /&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;</ZoneGroupState>
+                </property>
+            </propertyset>
+        "#;
+
+        let parser = ZoneGroupTopologyParser::from_xml(xml).unwrap();
+        let zone_groups = parser.zone_groups().unwrap();
+
+        assert_eq!(zone_groups.len(), 1);
+        assert_eq!(zone_groups[0].members.len(), 1);
+        assert_eq!(zone_groups[0].members[0].satellites.len(), 2);
+        assert_eq!(zone_groups[0].members[0].satellites[0], "RINCON_111111111");
+        assert_eq!(zone_groups[0].members[0].satellites[1], "RINCON_222222222");
+    }
+
+    #[test]
+    fn test_parser_from_xml_with_namespace_prefixes() {
+        let xml = r#"<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">
+            <e:property>
+                <ZoneGroupState>&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1"&gt;&lt;ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" /&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;</ZoneGroupState>
+            </e:property>
+        </e:propertyset>"#;
+
+        let parser = ZoneGroupTopologyParser::from_xml(xml).unwrap();
+        let zone_groups = parser.zone_groups().unwrap();
+
+        assert_eq!(zone_groups.len(), 1);
+        assert_eq!(zone_groups[0].coordinator, "RINCON_123456789");
+    }
+
+    #[test]
+    fn test_parser_from_xml_empty_zone_group_state() {
+        let xml = r#"
+            <propertyset>
+                <property>
+                    <ZoneGroupState></ZoneGroupState>
+                </property>
+            </propertyset>
+        "#;
+
+        let parser = ZoneGroupTopologyParser::from_xml(xml).unwrap();
+        let zone_groups = parser.zone_groups().unwrap();
+
+        assert_eq!(zone_groups.len(), 0);
+    }
+
+    #[test]
+    fn test_parser_from_xml_multiple_members_in_group() {
+        let xml = r#"
+            <propertyset>
+                <property>
+                    <ZoneGroupState>&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1"&gt;&lt;ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" /&gt;&lt;ZoneGroupMember UUID="RINCON_987654321" Location="http://192.168.1.101:1400/xml/device_description.xml" ZoneName="Kitchen" /&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;</ZoneGroupState>
+                </property>
+            </propertyset>
+        "#;
+
+        let parser = ZoneGroupTopologyParser::from_xml(xml).unwrap();
+        let zone_groups = parser.zone_groups().unwrap();
+
+        assert_eq!(zone_groups.len(), 1);
+        assert_eq!(zone_groups[0].coordinator, "RINCON_123456789");
+        assert_eq!(zone_groups[0].members.len(), 2);
+        assert_eq!(zone_groups[0].members[0].uuid, "RINCON_123456789");
+        assert_eq!(zone_groups[0].members[1].uuid, "RINCON_987654321");
+        assert_eq!(zone_groups[0].members[0].zone_name, "Living Room");
+        assert_eq!(zone_groups[0].members[1].zone_name, "Kitchen");
+    }
+
+    #[test]
+    fn test_parser_from_xml_real_sonos_xml() {
+        // Real XML from Sonos device with complex structure
+        let xml = r#"<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0"><e:property><ZoneGroupState>&lt;ZoneGroupState&gt;&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_C43875CA135801400" ID="RINCON_C43875CA135801400:2858411400"&gt;&lt;ZoneGroupMember UUID="RINCON_C43875CA135801400" Location="http://192.168.4.65:1400/xml/device_description.xml" ZoneName="Roam 2" Icon="" Configuration="1" SoftwareVersion="85.0-64200" /&gt;&lt;/ZoneGroup&gt;&lt;ZoneGroup Coordinator="RINCON_804AF2AA2FA201400" ID="RINCON_804AF2AA2FA201400:1331296863"&gt;&lt;ZoneGroupMember UUID="RINCON_804AF2AA2FA201400" Location="http://192.168.4.69:1400/xml/device_description.xml" ZoneName="Living Room" Icon="" Configuration="1" SoftwareVersion="85.0-65020" /&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;&lt;/ZoneGroupState&gt;</ZoneGroupState></e:property></e:propertyset>"#;
+
+        let parser = ZoneGroupTopologyParser::from_xml(xml).unwrap();
+        let zone_groups = parser.zone_groups().unwrap();
+
+        assert_eq!(zone_groups.len(), 2);
+        assert_eq!(zone_groups[0].coordinator, "RINCON_C43875CA135801400");
+        assert_eq!(zone_groups[1].coordinator, "RINCON_804AF2AA2FA201400");
+        assert_eq!(zone_groups[0].members[0].zone_name, "Roam 2");
+        assert_eq!(zone_groups[1].members[0].zone_name, "Living Room");
+    }
+
+    #[test]
+    fn test_parser_from_xml_with_zone_group_state_wrapper() {
+        let xml = r#"
+            <propertyset>
+                <property>
+                    <ZoneGroupState>&lt;ZoneGroupState&gt;&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1"&gt;&lt;ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" /&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;&lt;/ZoneGroupState&gt;</ZoneGroupState>
+                </property>
+            </propertyset>
+        "#;
+
+        let parser = ZoneGroupTopologyParser::from_xml(xml).unwrap();
+        let zone_groups = parser.zone_groups().unwrap();
+
+        assert_eq!(zone_groups.len(), 1);
+        assert_eq!(zone_groups[0].coordinator, "RINCON_123456789");
+        assert_eq!(zone_groups[0].members[0].zone_name, "Living Room");
+    }
+
+    #[test]
+    fn test_parser_invalid_xml() {
+        let invalid_xml = r#"<invalid>xml</invalid>"#;
+        let result = ZoneGroupTopologyParser::from_xml(invalid_xml);
+        assert!(result.is_err());
+    }
+
+    // Legacy function tests for backward compatibility
+    #[test]
+    fn test_parse_zone_group_state_from_upnp_event_legacy() {
+        let xml = r#"
+            <propertyset>
+                <property>
+                    <ZoneGroupState>&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1"&gt;&lt;ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" /&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;</ZoneGroupState>
+                </property>
+            </propertyset>
+        "#;
+
+
+
+        let result = parse_zone_group_state_from_upnp_event(xml).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].coordinator, "RINCON_123456789");
         assert_eq!(result[0].members.len(), 1);
@@ -99,25 +487,54 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_zone_group_state_multiple_groups() {
+    fn test_parse_zone_group_member_legacy() {
+        let member_xml = r#"<ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" />"#;
+        let result = parse_zone_group_member(member_xml).unwrap();
+        assert_eq!(result.uuid, "RINCON_123456789");
+        assert_eq!(result.satellites().len(), 0);
+    }
+
+    #[test]
+    fn test_zone_group_topology_parser_legacy_struct() {
+        let xml = r#"
+            <propertyset>
+                <property>
+                    <ZoneGroupState>&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1"&gt;&lt;ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" /&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;</ZoneGroupState>
+                </property>
+            </propertyset>
+        "#;
+
+        let result = ZoneGroupTopologyParserLegacy::parse_zone_group_state_from_upnp_event(xml).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].coordinator, "RINCON_123456789");
+    }
+
+    #[test]
+    fn test_parse_zone_group_state_direct_zone_groups() {
         let xml = r#"
             <ZoneGroups>
                 <ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1">
                     <ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" />
                 </ZoneGroup>
-                <ZoneGroup Coordinator="RINCON_987654321" ID="RINCON_987654321:1">
-                    <ZoneGroupMember UUID="RINCON_987654321" Location="http://192.168.1.101:1400/xml/device_description.xml" ZoneName="Kitchen" />
-                </ZoneGroup>
             </ZoneGroups>
         "#;
-        let result = ZoneGroupTopologyParser::parse_zone_group_state(xml).unwrap();
-        assert_eq!(result.len(), 2);
+
+        let result = parse_zone_group_state_from_upnp_event(xml).unwrap();
+        assert_eq!(result.len(), 1);
         assert_eq!(result[0].coordinator, "RINCON_123456789");
-        assert_eq!(result[1].coordinator, "RINCON_987654321");
+        assert_eq!(result[0].members.len(), 1);
+        assert_eq!(result[0].members[0].uuid, "RINCON_123456789");
     }
 
     #[test]
-    fn test_parse_zone_group_state_with_satellites() {
+    fn test_parse_zone_group_state_empty_legacy() {
+        let xml = r#"<ZoneGroups></ZoneGroups>"#;
+        let result = parse_zone_group_state_from_upnp_event(xml).unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_zone_group_state_with_satellites_legacy() {
         let xml = r#"
             <ZoneGroups>
                 <ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1">
@@ -128,7 +545,8 @@ mod tests {
                 </ZoneGroup>
             </ZoneGroups>
         "#;
-        let result = ZoneGroupTopologyParser::parse_zone_group_state(xml).unwrap();
+
+        let result = parse_zone_group_state_from_upnp_event(xml).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].coordinator, "RINCON_123456789");
         assert_eq!(result[0].members.len(), 1);
@@ -136,38 +554,5 @@ mod tests {
         assert_eq!(result[0].members[0].satellites().len(), 2);
         assert_eq!(result[0].members[0].satellites()[0], "RINCON_111111111");
         assert_eq!(result[0].members[0].satellites()[1], "RINCON_222222222");
-    }
-
-    #[test]
-    fn test_parse_zone_group_member() {
-        let member_xml = r#"<ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" />"#;
-        let result = ZoneGroupTopologyParser::parse_zone_group_member(member_xml).unwrap();
-        assert_eq!(result.uuid, "RINCON_123456789");
-        assert_eq!(result.satellites().len(), 0);
-    }
-
-    #[test]
-    fn test_parse_zone_group_state_empty() {
-        let xml = r#"<ZoneGroups></ZoneGroups>"#;
-        let result = ZoneGroupTopologyParser::parse_zone_group_state(xml).unwrap();
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_parse_zone_group_state_multiple_members() {
-        let xml = r#"
-            <ZoneGroups>
-                <ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1">
-                    <ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" />
-                    <ZoneGroupMember UUID="RINCON_987654321" Location="http://192.168.1.101:1400/xml/device_description.xml" ZoneName="Kitchen" />
-                </ZoneGroup>
-            </ZoneGroups>
-        "#;
-        let result = ZoneGroupTopologyParser::parse_zone_group_state(xml).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].coordinator, "RINCON_123456789");
-        assert_eq!(result[0].members.len(), 2);
-        assert_eq!(result[0].members[0].uuid, "RINCON_123456789");
-        assert_eq!(result[0].members[1].uuid, "RINCON_987654321");
     }
 }

@@ -1,3 +1,4 @@
+use sonos::ServiceType;
 use sonos::{
     discover_speakers_with_timeout, get_zone_groups_from_speaker, streaming::EventStreamBuilder,
     PlaybackState, SonosError, SpeakerState, StateCache,
@@ -47,6 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("🚀 Starting event stream builder...");
             match builder
                 .with_state_cache(state_cache.clone())
+                .with_services(&[ServiceType::AVTransport, ServiceType::RenderingControl, ServiceType::ZoneGroupTopology])
                 .with_event_handler(move |_event| {
                     // Just increment event count - avoid blocking I/O in event handler
                     let _count = event_count_for_handler
