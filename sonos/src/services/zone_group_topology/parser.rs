@@ -1,9 +1,9 @@
 use crate::error::{Result, SonosError};
 use serde::Deserialize;
 
-/// Simple interface for parsing Zone Group Topology XML data
+/// Zone Group Topology parser using serde
 pub struct ZoneGroupTopologyParser {
-    property_set: Option<ZoneGroupTopologyPropertySet>,
+    data: ZoneGroupTopologyData,
 }
 
 /// Zone group information
@@ -23,131 +23,35 @@ pub struct ZoneGroupMemberInfo {
     pub satellites: Vec<String>,
 }
 
-/// UPnP PropertySet - internal XML mapping
+/// Main data structure for ZoneGroupTopology events
 #[derive(Debug, Deserialize)]
-struct ZoneGroupTopologyPropertySet {
+struct ZoneGroupTopologyData {
     #[serde(rename = "property")]
     property: ZoneGroupTopologyProperty,
 }
 
-/// UPnP Property containing ZoneGroupState or direct elements - internal XML mapping
+/// Property containing ZoneGroupState
 #[derive(Debug, Deserialize)]
 struct ZoneGroupTopologyProperty {
     #[serde(rename = "ZoneGroupState", default)]
     zone_group_state: Option<String>,
 }
 
-impl ZoneGroupTopologyParser {
-    /// Create a new parser from XML string
-    pub fn from_xml(xml: &str) -> Result<Self> {
-        let cleaned_xml = xml
-            .replace("e:propertyset", "propertyset")
-            .replace("e:property", "property");
-
-        let property_set = serde_xml_rs::from_str(&cleaned_xml)
-            .map_err(|e| SonosError::ParseError(format!("PropertySet parse error: {}", e)))?;
-
-        Ok(Self {
-            property_set: Some(property_set),
-        })
-    }
-
-    /// Get the zone groups from the parsed XML
-    pub fn zone_groups(&self) -> Option<Vec<ZoneGroupInfo>> {
-        let property_set = self.property_set.as_ref()?;
-
-        // Check ZoneGroupState property
-        if let Some(zone_group_state_xml) = &property_set.property.zone_group_state {
-            if zone_group_state_xml.trim().is_empty() {
-                return Some(Vec::new());
-            }
-
-            // Decode XML entities and parse manually
-            let decoded_xml = decode_html_entities(zone_group_state_xml);
-            
-            // Use manual parsing to extract zone group information
-            match parse_zone_groups_manually(&decoded_xml) {
-                Ok(zone_groups) => Some(zone_groups),
-                Err(_) => Some(Vec::new()), // Return empty list on parse error
-            }
-        } else {
-            None
-        }
-    }
-}
-
-// Helper functions (internal)
-fn parse_zone_groups_manually(xml: &str) -> Result<Vec<ZoneGroupInfo>> {
-    // Try to parse as ZoneGroupState first (with wrapper)
-    if let Ok(zone_group_state) = serde_xml_rs::from_str::<ZoneGroupStateWrapper>(xml) {
-        return Ok(convert_to_zone_group_info(zone_group_state.zone_groups.zone_groups));
-    }
-    
-    // Fallback: try to parse directly as ZoneGroups
-    match serde_xml_rs::from_str::<ZoneGroupsWrapper>(xml) {
-        Ok(zone_groups) => Ok(convert_to_zone_group_info(zone_groups.zone_groups)),
-        Err(e) => Err(SonosError::ParseError(format!("Serde XML error: {}", e))),
-    }
-}
-
-fn convert_to_zone_group_info(zone_groups: Vec<ZoneGroupSerde>) -> Vec<ZoneGroupInfo> {
-    zone_groups
-        .into_iter()
-        .filter_map(|group| {
-            let coordinator = group.coordinator?;
-            let coordinator_clone = coordinator.clone();
-            Some(ZoneGroupInfo {
-                coordinator,
-                id: group.id.unwrap_or_else(|| format!("{}:1", coordinator_clone)),
-            members: group
-                .members
-                .into_iter()
-                .map(|member| {
-                    let mut satellites = Vec::new();
-                    
-                    // Add satellites from attribute (comma-separated)
-                    if let Some(ref attr) = member.satellites_attr {
-                        for uuid in attr.split(',') {
-                            let uuid = uuid.trim();
-                            if !uuid.is_empty() {
-                                satellites.push(uuid.to_string());
-                            }
-                        }
-                    }
-                    
-                    // Add satellites from nested elements
-                    for satellite in member.satellite_elements {
-                        if let Some(uuid) = satellite.uuid {
-                            satellites.push(uuid);
-                        }
-                    }
-                    
-                    ZoneGroupMemberInfo {
-                        uuid: member.uuid.unwrap_or_default(),
-                        location: member.location.unwrap_or_default(),
-                        zone_name: member.zone_name.unwrap_or_default(),
-                        satellites,
-                    }
-                })
-                .collect(),
-            })
-        })
-        .collect()
-}
-
-// Internal XML structures for serde parsing
+/// Zone group state wrapper
 #[derive(Debug, Deserialize)]
 struct ZoneGroupStateWrapper {
     #[serde(rename = "ZoneGroups")]
     zone_groups: ZoneGroupsWrapper,
 }
 
+/// Zone groups container
 #[derive(Debug, Deserialize)]
 struct ZoneGroupsWrapper {
     #[serde(rename = "ZoneGroup", default)]
     zone_groups: Vec<ZoneGroupSerde>,
 }
 
+/// Individual zone group
 #[derive(Debug, Deserialize)]
 struct ZoneGroupSerde {
     #[serde(rename = "@Coordinator")]
@@ -158,6 +62,7 @@ struct ZoneGroupSerde {
     members: Vec<ZoneGroupMemberSerde>,
 }
 
+/// Zone group member
 #[derive(Debug, Deserialize)]
 struct ZoneGroupMemberSerde {
     #[serde(rename = "@UUID", default)]
@@ -172,47 +77,109 @@ struct ZoneGroupMemberSerde {
     satellite_elements: Vec<SatelliteSerde>,
 }
 
+/// Satellite speaker
 #[derive(Debug, Deserialize)]
 struct SatelliteSerde {
     #[serde(rename = "@UUID", default)]
     uuid: Option<String>,
 }
 
-fn parse_zone_group_state_from_upnp_event_internal(xml_content: &str) -> Result<Vec<super::types::XmlZoneGroupData>> {
-    // Use manual parsing and convert to legacy format
-    let decoded_xml = decode_html_entities(xml_content);
-    let zone_groups = parse_zone_groups_manually(&decoded_xml)?;
-    
-    // Convert to legacy format
-    let legacy_groups = zone_groups
-        .into_iter()
-        .map(|group| super::types::XmlZoneGroupData {
-            coordinator: group.coordinator,
-            members: group
-                .members
-                .into_iter()
-                .map(|member| super::types::XmlZoneGroupMember {
-                    uuid: member.uuid,
-                    satellites_attr: if member.satellites.is_empty() {
-                        None
-                    } else {
-                        Some(member.satellites.join(","))
-                    },
-                    satellite_elements: member
-                        .satellites
-                        .into_iter()
-                        .map(|uuid| super::types::XmlSatellite { uuid })
-                        .collect(),
-                })
-                .collect(),
-        })
-        .collect();
-    
-    Ok(legacy_groups)
+impl ZoneGroupTopologyParser {
+    /// Create a new parser from XML string
+    pub fn from_xml(xml: &str) -> Result<Self> {
+        let cleaned_xml = xml
+            .replace("e:propertyset", "propertyset")
+            .replace("e:property", "property");
+
+        let data = serde_xml_rs::from_str(&cleaned_xml)
+            .map_err(|e| SonosError::ParseError(format!("PropertySet parse error: {}", e)))?;
+
+        Ok(Self { data })
+    }
+
+    /// Get the zone groups from the parsed XML
+    pub fn zone_groups(&self) -> Option<Vec<ZoneGroupInfo>> {
+        // Check ZoneGroupState property
+        let zone_group_state_xml = self.data.property.zone_group_state.as_ref()?;
+        
+        if zone_group_state_xml.trim().is_empty() {
+            return Some(Vec::new());
+        }
+
+        // Decode XML entities
+        let decoded_xml = decode_html_entities(zone_group_state_xml);
+        
+        // Try to parse as ZoneGroupState (with wrapper) - this is the most common format
+        if let Ok(zone_group_state) = serde_xml_rs::from_str::<ZoneGroupStateWrapper>(&decoded_xml) {
+            return Some(convert_to_zone_group_info(zone_group_state.zone_groups.zone_groups));
+        }
+        
+        // Fallback: try to parse directly as ZoneGroups
+        if let Ok(zone_groups) = serde_xml_rs::from_str::<ZoneGroupsWrapper>(&decoded_xml) {
+            return Some(convert_to_zone_group_info(zone_groups.zone_groups));
+        }
+
+        // If parsing fails, return empty list
+        Some(Vec::new())
+    }
 }
 
-// Public helper functions
+/// Convert serde structures to domain models
+fn convert_to_zone_group_info(zone_groups: Vec<ZoneGroupSerde>) -> Vec<ZoneGroupInfo> {
+    zone_groups
+        .into_iter()
+        .filter_map(|group| {
+            let coordinator = group.coordinator?;
+            let coordinator_clone = coordinator.clone();
+            Some(ZoneGroupInfo {
+                coordinator,
+                id: group.id.unwrap_or_else(|| format!("{}:1", coordinator_clone)),
+                members: group
+                    .members
+                    .into_iter()
+                    .map(|member| {
+                        let mut satellites = Vec::new();
+                        
+                        // Add satellites from attribute (comma-separated)
+                        if let Some(ref attr) = member.satellites_attr {
+                            for uuid in attr.split(',') {
+                                let uuid = uuid.trim();
+                                if !uuid.is_empty() {
+                                    satellites.push(uuid.to_string());
+                                }
+                            }
+                        }
+                        
+                        // Add satellites from nested elements
+                        for satellite in member.satellite_elements {
+                            if let Some(uuid) = satellite.uuid {
+                                satellites.push(uuid);
+                            }
+                        }
+                        
+                        ZoneGroupMemberInfo {
+                            uuid: member.uuid.unwrap_or_default(),
+                            location: member.location.unwrap_or_default(),
+                            zone_name: member.zone_name.unwrap_or_default(),
+                            satellites,
+                        }
+                    })
+                    .collect(),
+            })
+        })
+        .collect()
+}
 
+/// Decode HTML entities in XML content
+fn decode_html_entities(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+}
+
+// Legacy functions for backward compatibility
 /// Parse zone group state from a UPnP event XML (legacy function for backward compatibility)
 pub fn parse_zone_group_state_from_upnp_event(xml_content: &str) -> Result<Vec<super::types::XmlZoneGroupData>> {
     let parser = ZoneGroupTopologyParser::from_xml(xml_content)?;
@@ -245,12 +212,7 @@ pub fn parse_zone_group_state_from_upnp_event(xml_content: &str) -> Result<Vec<s
         
         Ok(legacy_groups)
     } else {
-        // Try fallback parsing for direct zone groups XML
-        let decoded_xml = decode_html_entities(xml_content);
-        match serde_xml_rs::from_str::<super::types::XmlZoneGroups>(&decoded_xml) {
-            Ok(zone_groups) => Ok(zone_groups.zone_groups),
-            Err(e) => Err(SonosError::ParseError(format!("Serde XML error: {}", e))),
-        }
+        Ok(Vec::new())
     }
 }
 
@@ -259,32 +221,6 @@ pub fn parse_zone_group_member(member_xml: &str) -> Result<super::types::XmlZone
     match serde_xml_rs::from_str::<super::types::XmlZoneGroupMember>(member_xml) {
         Ok(member) => Ok(member),
         Err(e) => Err(SonosError::ParseError(format!("Serde XML error: {}", e))),
-    }
-}
-
-// Internal helper functions
-fn decode_html_entities(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-}
-
-/// ZoneGroupTopology service-specific parsing functions (legacy struct for backward compatibility)
-pub struct ZoneGroupTopologyParserLegacy;
-
-impl ZoneGroupTopologyParserLegacy {
-    /// Parse zone group state from a UPnP event XML using serde (legacy method)
-    pub fn parse_zone_group_state_from_upnp_event(
-        xml_content: &str,
-    ) -> Result<Vec<super::types::XmlZoneGroupData>> {
-        parse_zone_group_state_from_upnp_event(xml_content)
-    }
-
-    /// Parse a single zone group member using serde (legacy method)
-    pub fn parse_zone_group_member(member_xml: &str) -> Result<super::types::XmlZoneGroupMember> {
-        parse_zone_group_member(member_xml)
     }
 }
 
@@ -504,7 +440,7 @@ mod tests {
             </propertyset>
         "#;
 
-        let result = ZoneGroupTopologyParserLegacy::parse_zone_group_state_from_upnp_event(xml).unwrap();
+        let result = parse_zone_group_state_from_upnp_event(xml).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].coordinator, "RINCON_123456789");
     }

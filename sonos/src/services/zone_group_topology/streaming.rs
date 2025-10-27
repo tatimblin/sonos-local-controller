@@ -1,4 +1,4 @@
-use super::types::XmlZoneGroupData;
+use super::parser;
 use crate::models::{Group, GroupId, Speaker, SpeakerId, StateChange};
 use crate::streaming::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
 use crate::streaming::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
@@ -13,8 +13,8 @@ use std::time::SystemTime;
 /// updates across all Sonos devices in the network. Unlike per-speaker services, this is a
 /// network-wide service that only requires one subscription per network.
 pub struct ZoneGroupTopologySubscription {
-    /// Representative speaker for this network (used for subscription endpoint)
-    representative_speaker: Speaker,
+    /// The speaker this subscription is associated with (representative speaker)
+    speaker: Speaker,
     /// Current subscription ID (None if not subscribed)
     subscription_id: Option<SubscriptionId>,
     /// UPnP SID (Subscription ID) returned by the device
@@ -33,18 +33,13 @@ pub struct ZoneGroupTopologySubscription {
 
 impl ZoneGroupTopologySubscription {
     /// Create a new ZoneGroupTopology subscription
-    ///
-    /// # Arguments
-    /// * `representative_speaker` - The speaker to use for the subscription endpoint
-    /// * `callback_url` - URL where the device should send event notifications
-    /// * `config` - Configuration for this subscription
     pub fn new(
-        representative_speaker: Speaker,
+        speaker: Speaker,
         callback_url: String,
         config: SubscriptionConfig,
     ) -> SubscriptionResult<Self> {
         Ok(Self {
-            representative_speaker,
+            speaker,
             subscription_id: None,
             upnp_sid: None,
             callback_url,
@@ -55,12 +50,9 @@ impl ZoneGroupTopologySubscription {
         })
     }
 
-    /// Get the device URL for the representative speaker
+    /// Get the device URL for this speaker
     fn device_url(&self) -> String {
-        format!(
-            "http://{}:{}",
-            self.representative_speaker.ip_address, self.representative_speaker.port
-        )
+        format!("http://{}:{}", self.speaker.ip_address, self.speaker.port)
     }
 
     /// Send a UPnP SUBSCRIBE request to establish the subscription
@@ -69,10 +61,7 @@ impl ZoneGroupTopologySubscription {
         let event_sub_url = ServiceType::ZoneGroupTopology.event_sub_url();
         let full_url = format!("{}{}", device_url, event_sub_url);
 
-        println!(
-            "📡 Sending ZoneGroupTopology SUBSCRIBE request to: {}",
-            full_url
-        );
+        println!("📡 Sending SUBSCRIBE request to: {}", full_url);
         println!("   Callback URL: {}", self.callback_url);
 
         // Create HTTP client for subscription requests with timeout
@@ -89,10 +78,7 @@ impl ZoneGroupTopologySubscription {
             )
             .header(
                 "HOST",
-                format!(
-                    "{}:{}",
-                    self.representative_speaker.ip_address, self.representative_speaker.port
-                ),
+                format!("{}:{}", self.speaker.ip_address, self.speaker.port),
             )
             .header("CALLBACK", format!("<{}>", self.callback_url))
             .header("NT", "upnp:event")
@@ -150,10 +136,7 @@ impl ZoneGroupTopologySubscription {
             )
             .header(
                 "HOST",
-                format!(
-                    "{}:{}",
-                    self.representative_speaker.ip_address, self.representative_speaker.port
-                ),
+                format!("{}:{}", self.speaker.ip_address, self.speaker.port),
             )
             .header("SID", sid)
             .send()
@@ -187,10 +170,7 @@ impl ZoneGroupTopologySubscription {
             )
             .header(
                 "HOST",
-                format!(
-                    "{}:{}",
-                    self.representative_speaker.ip_address, self.representative_speaker.port
-                ),
+                format!("{}:{}", self.speaker.ip_address, self.speaker.port),
             )
             .header("SID", sid)
             .header("TIMEOUT", format!("Second-{}", self.config.timeout_seconds))
@@ -208,145 +188,55 @@ impl ZoneGroupTopologySubscription {
     }
 
     /// Parse ZoneGroupTopology XML and extract group information
-    pub fn parse_zone_group_state(&self, xml: &str) -> SubscriptionResult<Vec<Group>> {
+    fn parse_zone_group_state(&self, xml: &str) -> SubscriptionResult<Vec<Group>> {
         println!("🔍 Parsing ZoneGroupTopology XML...");
         println!("   XML length: {} bytes", xml.len());
-
-        if xml.is_empty() {
-            return Err(SubscriptionError::EventParseError(
-                "Empty XML content".to_string(),
-            ));
-        }
-
         println!(
             "   XML preview: {}",
             xml.chars().take(200).collect::<String>()
         );
 
-        let mut groups = Vec::new();
-
-        // Use the new ZoneGroupTopologyParser to parse zone group state from UPnP event
-        match crate::services::zone_group_topology::parser::ZoneGroupTopologyParser::from_xml(xml) {
+        // Use the ZoneGroupTopologyParser to parse zone group state from UPnP event
+        match parser::ZoneGroupTopologyParser::from_xml(xml) {
             Ok(parser) => {
                 match parser.zone_groups() {
                     Some(zone_groups) => {
-                        if zone_groups.is_empty() {
-                            println!("ℹ️ No zone groups found in UPnP event");
-                        } else {
-                            println!("✅ Found {} zone groups in UPnP event", zone_groups.len());
-                        }
-
-                        // Convert new parser data structures to domain models
-                        groups = self.convert_new_parser_groups_to_domain_models(zone_groups)?;
+                        println!("✅ Found {} zone groups in UPnP event", zone_groups.len());
+                        // Convert parser data structures to domain models
+                        self.convert_parser_groups_to_domain_models(zone_groups)
                     }
                     None => {
                         println!("ℹ️ Parser returned None for zone_groups()");
-                        // Return empty groups list
-                        groups = Vec::new();
+                        Ok(Vec::new())
                     }
                 }
             }
             Err(e) => {
-                return Err(SubscriptionError::EventParseError(format!(
+                Err(SubscriptionError::EventParseError(format!(
                     "Failed to parse ZoneGroupState from UPnP event: {}",
                     e
-                )));
+                )))
             }
         }
-
-        println!("✅ Successfully parsed {} groups", groups.len());
-        Ok(groups)
     }
 
-    /// Convert XML zone group data structures to domain models
-    fn convert_xml_groups_to_domain_models(
+    /// Convert parser zone group data structures to domain models
+    fn convert_parser_groups_to_domain_models(
         &self,
-        xml_groups: Vec<XmlZoneGroupData>,
-    ) -> SubscriptionResult<Vec<Group>> {
-        let mut groups = Vec::new();
-
-        for xml_group in xml_groups {
-            if xml_group.coordinator.trim().is_empty() {
-                println!("⚠️ Skipping group with empty coordinator");
-                continue;
-            }
-
-            let coordinator_id = SpeakerId::from_udn(&format!("uuid:{}", xml_group.coordinator));
-            let mut group = Group::new(coordinator_id);
-
-            println!(
-                "🔍 Converting XML group with coordinator: {}",
-                xml_group.coordinator
-            );
-
-            for xml_member in xml_group.members {
-                if xml_member.uuid.trim().is_empty() {
-                    println!("⚠️ Skipping member with empty UUID");
-                    continue;
-                }
-
-                let speaker_id = SpeakerId::from_udn(&format!("uuid:{}", xml_member.uuid));
-
-                // Convert satellite UUIDs to SpeakerIds
-                let satellites: Vec<SpeakerId> = xml_member
-                    .satellites()
-                    .iter()
-                    .filter(|uuid| !uuid.trim().is_empty())
-                    .map(|uuid| SpeakerId::from_udn(&format!("uuid:{}", uuid)))
-                    .collect();
-
-                let satellite_count = satellites.len();
-                group.add_member_with_satellites(speaker_id, satellites);
-
-                if satellite_count == 0 {
-                    println!("✅ Added member {:?} to group", speaker_id);
-                } else {
-                    println!(
-                        "✅ Added member {:?} with {} satellites to group",
-                        speaker_id, satellite_count
-                    );
-                }
-            }
-
-            if group.member_count() == 0 {
-                println!("⚠️ ZoneGroup has no valid members, skipping");
-                continue;
-            }
-
-            println!(
-                "✅ Successfully converted ZoneGroup with {} members",
-                group.member_count()
-            );
-            groups.push(group);
-        }
-
-        Ok(groups)
-    }
-
-    /// Convert new parser zone group data structures to domain models
-    fn convert_new_parser_groups_to_domain_models(
-        &self,
-        zone_groups: Vec<crate::services::zone_group_topology::parser::ZoneGroupInfo>,
+        zone_groups: Vec<parser::ZoneGroupInfo>,
     ) -> SubscriptionResult<Vec<Group>> {
         let mut groups = Vec::new();
 
         for zone_group in zone_groups {
             if zone_group.coordinator.trim().is_empty() {
-                println!("⚠️ Skipping group with empty coordinator");
                 continue;
             }
 
             let coordinator_id = SpeakerId::from_udn(&format!("uuid:{}", zone_group.coordinator));
             let mut group = Group::new(coordinator_id);
 
-            println!(
-                "🔍 Converting new parser group with coordinator: {}",
-                zone_group.coordinator
-            );
-
             for member in zone_group.members {
                 if member.uuid.trim().is_empty() {
-                    println!("⚠️ Skipping member with empty UUID");
                     continue;
                 }
 
@@ -360,29 +250,12 @@ impl ZoneGroupTopologySubscription {
                     .map(|uuid| SpeakerId::from_udn(&format!("uuid:{}", uuid)))
                     .collect();
 
-                let satellite_count = satellites.len();
                 group.add_member_with_satellites(speaker_id, satellites);
-
-                if satellite_count == 0 {
-                    println!("✅ Added member {:?} to group", speaker_id);
-                } else {
-                    println!(
-                        "✅ Added member {:?} with {} satellites to group",
-                        speaker_id, satellite_count
-                    );
-                }
             }
 
-            if group.member_count() == 0 {
-                println!("⚠️ ZoneGroup has no valid members, skipping");
-                continue;
+            if group.member_count() > 0 {
+                groups.push(group);
             }
-
-            println!(
-                "✅ Successfully converted ZoneGroup with {} members",
-                group.member_count()
-            );
-            groups.push(group);
         }
 
         Ok(groups)
@@ -563,8 +436,7 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
     }
 
     fn speaker_id(&self) -> SpeakerId {
-        // Return the representative speaker's ID
-        self.representative_speaker.id
+        self.speaker.id
     }
 
     fn subscribe(&mut self) -> SubscriptionResult<SubscriptionId> {
@@ -578,10 +450,7 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
         self.active = true;
         self.last_renewal = Some(SystemTime::now());
 
-        println!(
-            "✅ ZoneGroupTopology subscription established with ID: {}",
-            subscription_id
-        );
+
         Ok(subscription_id)
     }
 
@@ -596,7 +465,7 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
         self.last_renewal = None;
         *self.last_zone_groups.lock().unwrap() = None;
 
-        println!("✅ ZoneGroupTopology subscription terminated");
+
         Ok(())
     }
 
@@ -608,7 +477,7 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
         if let Some(upnp_sid) = &self.upnp_sid {
             self.send_renewal_request(upnp_sid)?;
             self.last_renewal = Some(SystemTime::now());
-            println!("✅ ZoneGroupTopology subscription renewed");
+
             Ok(())
         } else {
             Err(SubscriptionError::SubscriptionExpired)
@@ -616,30 +485,37 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
     }
 
     fn parse_event(&self, event_xml: &str) -> SubscriptionResult<Vec<StateChange>> {
-        println!("🔍 Parsing ZoneGroupTopology event...");
+        let mut changes = Vec::new();
 
-        // Parse the zone group state from the event with comprehensive error handling
-        let new_groups = match self.parse_zone_group_state(event_xml) {
-            Ok(groups) => groups,
-            Err(e) => {
-                println!("❌ Failed to parse ZoneGroupTopology XML: {}", e);
-                // Log the error but don't fail completely - return empty changes
-                // This allows the system to continue processing other events
-                return Ok(vec![StateChange::SubscriptionError {
-                    speaker_id: self.representative_speaker.id,
-                    service: ServiceType::ZoneGroupTopology,
-                    error: format!("XML parsing failed: {}", e),
-                }]);
+        // Parse the zone group state from the event
+        match self.parse_zone_group_state(event_xml) {
+            Ok(new_groups) => {
+                // Detect changes and generate appropriate StateChange events
+                let topology_changes = self.detect_topology_changes(&new_groups);
+                changes.extend(topology_changes);
             }
-        };
+            Err(e) => {
+                println!("❌ XML parsing error in parse_event: {}", e);
+                println!("🔍 Saving problematic XML to file for debugging...");
+                
+                // Save the problematic XML to a file for analysis
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let filename = format!("problematic_xml_{}.xml", timestamp);
+                
+                if let Err(write_err) = std::fs::write(&filename, event_xml) {
+                    println!("❌ Failed to write XML to file: {}", write_err);
+                } else {
+                    println!("✅ Saved problematic XML to: {}", filename);
+                }
+                
+                // Don't return error - just log it and continue with empty changes
+                // This allows the system to continue working even if some events fail to parse
+            }
+        }
 
-        // Detect changes and generate appropriate StateChange events
-        let changes = self.detect_topology_changes(&new_groups);
-
-        println!(
-            "✅ Generated {} state changes from ZoneGroupTopology event",
-            changes.len()
-        );
         Ok(changes)
     }
 
@@ -694,12 +570,12 @@ mod tests {
 
     #[test]
     fn test_zone_group_topology_subscription_creation() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
+        let speaker = create_test_speaker("123456789", "192.168.1.100");
         let callback_url = "http://localhost:8080/callback/test".to_string();
         let config = SubscriptionConfig::default();
 
         let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker.clone(),
+            speaker.clone(),
             callback_url.clone(),
             config,
         );
@@ -709,7 +585,7 @@ mod tests {
         let sub = subscription.unwrap();
         assert_eq!(sub.service_type(), ServiceType::ZoneGroupTopology);
         assert_eq!(sub.subscription_scope(), SubscriptionScope::NetworkWide);
-        assert_eq!(sub.speaker_id(), representative_speaker.id);
+        assert_eq!(sub.speaker_id(), speaker.id);
         assert_eq!(sub.callback_url(), &callback_url);
         assert!(!sub.is_active());
         assert!(sub.subscription_id().is_none());
@@ -740,9 +616,9 @@ mod tests {
 
     #[test]
     fn test_parse_zone_group_state_empty() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
+        let speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
+            speaker,
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -760,9 +636,9 @@ mod tests {
 
     #[test]
     fn test_detect_topology_changes_initial() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
+        let speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
+            speaker,
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
@@ -789,9 +665,9 @@ mod tests {
 
     #[test]
     fn test_detect_topology_changes_subsequent() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
+        let speaker = create_test_speaker("123456789", "192.168.1.100");
         let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
+            speaker,
             "http://localhost:8080/callback".to_string(),
             SubscriptionConfig::default(),
         )
