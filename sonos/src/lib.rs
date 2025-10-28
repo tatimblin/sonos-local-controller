@@ -4,6 +4,7 @@ pub mod error;
 pub mod api;
 pub mod state;
 pub mod streaming;
+pub mod service;
 
 // Re-export key types for easier access
 pub use models::{Speaker, Group, SpeakerId, GroupId, SpeakerState, PlaybackState, StateChange};

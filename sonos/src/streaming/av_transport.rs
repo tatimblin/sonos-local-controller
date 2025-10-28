@@ -1,6 +1,7 @@
 use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
 use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use crate::models::{PlaybackState, Speaker, SpeakerId, StateChange, TrackInfo};
+use crate::service::av_transport;
 use crate::transport::soap::SoapClient;
 use std::time::SystemTime;
 
@@ -191,8 +192,11 @@ impl AVTransportSubscription {
     fn parse_transport_state(&self, xml: &str) -> SubscriptionResult<Option<PlaybackState>> {
         println!("🔍 Parsing transport state from XML...");
         println!("   XML length: {} bytes", xml.len());
-        println!("   XML preview: {}", xml.chars().take(200).collect::<String>());
-        
+        println!(
+            "   XML preview: {}",
+            xml.chars().take(200).collect::<String>()
+        );
+
         // Look for TransportState in the event XML
         if let Some(state_str) = self.extract_property_value(xml, "TransportState") {
             println!("✅ Found TransportState: {}", state_str);
@@ -208,17 +212,17 @@ impl AVTransportSubscription {
             }
         } else {
             println!("❌ No TransportState found in XML");
-            
+
             // Try to extract LastChange content for debugging
             if let Some(last_change) = self.extract_property_value(xml, "LastChange") {
                 println!("🔍 Found LastChange content:");
                 println!("   {}", last_change.chars().take(300).collect::<String>());
-                
+
                 // Try to parse the escaped XML in LastChange
                 let decoded = self.decode_xml_entities(&last_change);
                 println!("🔍 Decoded LastChange:");
                 println!("   {}", decoded.chars().take(300).collect::<String>());
-                
+
                 // Look for TransportState in the decoded content
                 if decoded.contains("TransportState") {
                     println!("✅ Found TransportState in decoded LastChange!");
@@ -228,14 +232,17 @@ impl AVTransportSubscription {
                         if let Some(end) = decoded[content_start..].find("\"") {
                             let state_value = &decoded[content_start..content_start + end];
                             println!("✅ Extracted TransportState value: {}", state_value);
-                            
+
                             match state_value {
                                 "PLAYING" => return Ok(Some(PlaybackState::Playing)),
                                 "PAUSED_PLAYBACK" => return Ok(Some(PlaybackState::Paused)),
                                 "STOPPED" => return Ok(Some(PlaybackState::Stopped)),
                                 "TRANSITIONING" => return Ok(Some(PlaybackState::Transitioning)),
                                 _ => {
-                                    println!("⚠️  Unknown transport state in LastChange: {}", state_value);
+                                    println!(
+                                        "⚠️  Unknown transport state in LastChange: {}",
+                                        state_value
+                                    );
                                     return Ok(None);
                                 }
                             }
@@ -243,7 +250,7 @@ impl AVTransportSubscription {
                     }
                 }
             }
-            
+
             Ok(None) // No transport state in this event
         }
     }
@@ -294,7 +301,7 @@ impl AVTransportSubscription {
             ("<property>", "</property>"),
             ("<e:property>", "</e:property>"),
         ];
-        
+
         let var_start = format!("<{}>", property_name);
         let var_end = format!("</{}>", property_name);
 
@@ -428,6 +435,11 @@ impl ServiceSubscription for AVTransportSubscription {
 
     fn parse_event(&self, event_xml: &str) -> SubscriptionResult<Vec<StateChange>> {
         let mut changes = Vec::new();
+
+        println!(
+            "Parse AVTransport: {:?}",
+            av_transport::parser::AVTransportParser::from_xml(event_xml)
+        );
 
         // Parse transport state changes
         if let Some(playback_state) = self.parse_transport_state(event_xml)? {

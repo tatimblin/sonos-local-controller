@@ -7,6 +7,7 @@ edition = "2021"
 [dependencies]
 reqwest = { version = "0.12.23", features = ["blocking"] }
 serde = { version = "1.0", features = ["derive"] }
+serde-xml-rs = "0.6"
 quick-xml = { version = "0.36", features = ["serialize"] }
 uuid = { version = "1.0", features = ["v4"] }
 thiserror = "1.0"
