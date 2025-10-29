@@ -436,10 +436,19 @@ impl ServiceSubscription for AVTransportSubscription {
     fn parse_event(&self, event_xml: &str) -> SubscriptionResult<Vec<StateChange>> {
         let mut changes = Vec::new();
 
-        println!(
-            "Parse AVTransport: {:?}",
-            av_transport::parser::AVTransportParser::from_xml(event_xml)
-        );
+
+        println!("                      ~~~~~~");
+        println!("raw event: {:?}", event_xml);
+        match av_transport::parser::AVTransportParser::from_xml(event_xml) {
+          Ok(parser) => match parser.to_event() {
+            Ok(event) => {
+              println!("                      ~~~~~~");
+              println!("Parse AVTransport: {:?}", event)
+            },
+            Err(e) => println!("~~~Failed to parse event: {:?}", e),
+          },
+          Err(e) => println!("~~~Failed to parse XML: {:?}", e),
+        }
 
         // Parse transport state changes
         if let Some(playback_state) = self.parse_transport_state(event_xml)? {
