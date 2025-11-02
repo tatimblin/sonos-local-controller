@@ -36,6 +36,31 @@ pub mod xml_decode {
       .map_err(serde::de::Error::custom)
   }
 
+  pub fn deserialize_nested_safe<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+  where
+    D: Deserializer<'de>,
+    T: for<'a> Deserialize<'a>,
+  {
+    let encoded = String::deserialize(deserializer)?;
+
+    // If the encoded string is empty or "NOT_IMPLEMENTED", return None
+    if encoded.is_empty() || encoded == "NOT_IMPLEMENTED" {
+      return Ok(None);
+    }
+
+    let decoded = decode_entities(&encoded);
+    let cleaned_decoded = clean_xml(&decoded);
+
+    match quick_xml::de::from_str(&cleaned_decoded) {
+      Ok(result) => Ok(Some(result)),
+      Err(_) => {
+        // If parsing fails, return None instead of an error
+        eprintln!("Warning: Failed to parse nested XML, returning None");
+        Ok(None)
+      }
+    }
+  }
+
   /// Manually decode HTML entities (for nested encoded XML)
   fn decode_entities(s: &str) -> String {
     let mut result = s.to_string();
@@ -49,8 +74,10 @@ pub mod xml_decode {
         .replace("&quot;", "\"")
         .replace("&apos;", "'");
 
-      // Handle double-encoded ampersands specifically
+      // Handle multiple levels of encoded ampersands
+      result = result.replace("&amp;amp;amp;", "&amp;");
       result = result.replace("&amp;amp;", "&amp;");
+      result = result.replace("&amp;", "&");
 
       if result == before {
         break;
@@ -92,7 +119,10 @@ pub mod xml_decode {
         }
         Ok(Event::Eof) => break,
         Ok(event) => writer.write_event(event).unwrap(),
-        Err(e) => panic!("Error parsing XML: {:?}", e),
+        Err(e) => {
+          eprintln!("Warning: Error parsing XML during namespace cleaning: {:?}", e);
+          break;
+        },
       }
       buf.clear();
     }

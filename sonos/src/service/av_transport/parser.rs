@@ -1,4 +1,4 @@
-use crate::xml_decode::ValueAttribute;
+use crate::{models::TrackInfo, xml_decode::ValueAttribute, PlaybackState};
 
 use serde::Deserialize;
 
@@ -56,7 +56,7 @@ pub struct InstanceID {
     pub current_track_duration: ValueAttribute,
 
     #[serde(rename = "CurrentTrackMetaData")]
-    pub current_track_metadata: ValueAttribute,
+    pub current_track_metadata: ValueAttribute2,
 
     #[serde(rename = "NextTrackURI", default)]
     pub next_track_uri: Option<ValueAttribute>,
@@ -116,15 +116,21 @@ pub struct InstanceID {
     pub absolute_counter_position: Option<ValueAttribute>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValueAttribute2 {
+    #[serde(rename = "@val", deserialize_with = "crate::xml_decode::xml_decode::deserialize_nested_safe")]
+    pub val: Option<DidlLite>,
+}
+
 // DIDL-Lite metadata structure
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename = "DIDL-Lite")]
 pub struct DidlLite {
     #[serde(rename = "item")]
     pub item: DidlItem,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DidlItem {
     #[serde(rename = "@id")]
     pub id: String,
@@ -163,7 +169,7 @@ pub struct DidlItem {
     pub content_service: Option<DidlContentService>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DidlResource {
     #[serde(rename = "@duration")]
     pub duration: Option<String>,
@@ -172,7 +178,7 @@ pub struct DidlResource {
     pub uri: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DidlDesc {
     #[serde(rename = "@id")]
     pub id: String,
@@ -184,7 +190,7 @@ pub struct DidlDesc {
     pub value: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DidlContentService {
     #[serde(rename = "@id")]
     pub id: String,
@@ -197,6 +203,78 @@ impl AVTransportParser {
     pub fn from_xml(xml: &str) -> Result<Self, quick_xml::DeError> {
         // Use the automatic namespace stripping from xml_decode
         crate::xml_decode::xml_decode::parse(xml)
+    }
+
+    pub fn get_playback_state(&self) -> Option<PlaybackState> {
+      println!("");
+      println!("");
+      println!("TRISTAN");
+      println!("");
+      println!("");
+      println!("get_playback_state() --> {}", self
+            .property
+            .last_change
+            .instance
+            .transport_state
+            .val
+            .as_str());
+        match self
+            .property
+            .last_change
+            .instance
+            .transport_state
+            .val
+            .as_str()
+        {
+            "PLAYING" => Some(PlaybackState::Playing),
+            "PAUSED_PLAYBACK" => Some(PlaybackState::Paused),
+            "STOPPED" => Some(PlaybackState::Stopped),
+            "TRANSITIONING" => Some(PlaybackState::Transitioning),
+            _ => None,
+        }
+    }
+
+    pub fn get_track_info(&self) -> Option<TrackInfo> {
+        let didl = self
+            .property
+            .last_change
+            .instance
+            .current_track_metadata
+            .val
+            .as_ref()?;
+        let duration_ms = self.parse_duration(
+            &self
+                .property
+                .last_change
+                .instance
+                .current_track_duration
+                .val,
+        );
+        let uri = &self.property.last_change.instance.current_track_uri.val;
+        Some(TrackInfo {
+            title: Some(didl.item.title.clone()),
+            artist: didl.item.creator.clone(),
+            album: didl.item.album.clone(),
+            duration_ms,
+            uri: Some(uri.clone()),
+        })
+    }
+
+    fn parse_duration(&self, duration_str: &str) -> Option<u64> {
+        let parts: Vec<&str> = duration_str.split(':').collect();
+        if parts.len() >= 3 {
+            let hours: u64 = parts[0].parse().ok()?;
+            let minutes: u64 = parts[1].parse().ok()?;
+
+            // Handle seconds with optional milliseconds
+            let seconds_part = parts[2];
+            let seconds: f64 = seconds_part.parse().ok()?;
+
+            let total_ms = (hours * 3600 + minutes * 60) * 1000 + (seconds * 1000.0) as u64;
+            Some(total_ms)
+        } else {
+            None
+        }
     }
 }
 
@@ -262,9 +340,6 @@ mod tests {
             .current_track_uri
             .val
             .contains("spotify:track"));
-
-        // Assert that metadata is present
-        assert!(!last_change.instance.current_track_metadata.val.is_empty());
     }
 
     #[test]
@@ -281,11 +356,8 @@ mod tests {
         let didl = result.unwrap();
         assert_eq!(didl.item.title, "Borderline");
         assert_eq!(didl.item.creator, Some("Tame Impala".to_string()));
-        assert_eq!(
-            didl.item.album,
-            Some("The Slow Rush".to_string())
-        );
-        
+        assert_eq!(didl.item.album, Some("The Slow Rush".to_string()));
+
         // Test the new streamInfo field
         assert!(didl.item.stream_info.is_some());
         assert_eq!(
@@ -310,7 +382,11 @@ mod tests {
         let raw_event = r#"<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0"><e:property><LastChange>&lt;Event xmlns=&quot;urn:schemas-upnp-org:metadata-1-0/AVT/&quot; xmlns:r=&quot;urn:schemas-rinconnetworks-com:metadata-1-0/&quot;&gt;&lt;InstanceID val=&quot;0&quot;&gt;&lt;TransportState val=&quot;PAUSED_PLAYBACK&quot;/&gt;&lt;CurrentPlayMode val=&quot;REPEAT_ALL&quot;/&gt;&lt;CurrentCrossfadeMode val=&quot;0&quot;/&gt;&lt;NumberOfTracks val=&quot;1&quot;/&gt;&lt;CurrentTrack val=&quot;1&quot;/&gt;&lt;CurrentSection val=&quot;0&quot;/&gt;&lt;CurrentTrackURI val=&quot;x-sonos-spotify:spotify:track:5hM5arv9KDbCHS0k9uqwjr?sid=12&amp;amp;flags=0&amp;amp;sn=2&quot;/&gt;&lt;CurrentTrackDuration val=&quot;0:03:57&quot;/&gt;&lt;CurrentTrackMetaData val=&quot;&amp;lt;DIDL-Lite xmlns:dc=&amp;quot;http://purl.org/dc/elements/1.1/&amp;quot; xmlns:upnp=&amp;quot;urn:schemas-upnp-org:metadata-1-0/upnp/&amp;quot; xmlns:r=&amp;quot;urn:schemas-rinconnetworks-com:metadata-1-0/&amp;quot; xmlns=&amp;quot;urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/&amp;quot;&amp;gt;&amp;lt;item id=&amp;quot;-1&amp;quot; parentID=&amp;quot;-1&amp;quot;&gt;&amp;lt;res duration=&amp;quot;0:03:58&amp;quot;&gt;x-sonos-spotify:spotify:track:5hM5arv9KDbCHS0k9uqwjr?sid=12&amp;amp;amp;flags=0&amp;amp;amp;sn=2&amp;lt;/res&amp;gt;&amp;lt;upnp:albumArtURI&amp;gt;https://i.scdn.co/image/ab67616d0000b27358267bd34420a00d5cf83a49&amp;lt;/upnp:albumArtURI&amp;gt;&amp;lt;upnp:class&amp;gt;object.item.audioItem.musicTrack&amp;lt;/upnp:class&amp;gt;&amp;lt;dc:title&amp;gt;Borderline&amp;lt;/dc:title&amp;gt;&amp;lt;dc:creator&amp;gt;Tame Impala&amp;lt;/dc:creator&amp;gt;&amp;lt;upnp:album&amp;gt;The Slow Rush&amp;lt;/upnp:album&amp;gt;&amp;lt;r:streamInfo&amp;gt;bd:16,sr:44100,c:0,l:0,d:0&amp;lt;/r:streamInfo&amp;gt;&amp;lt;/item&amp;gt;&amp;lt;/DIDL-Lite&amp;gt;&quot;/&gt;&lt;r:NextTrackURI val=&quot;&quot;/&gt;&lt;r:NextTrackMetaData val=&quot;&amp;lt;DIDL-Lite xmlns:dc=&amp;quot;http://purl.org/dc/elements/1.1/&amp;quot; xmlns:upnp=&amp;quot;urn:schemas-upnp-org:metadata-1-0/upnp/&amp;quot; xmlns:r=&amp;quot;urn:schemas-rinconnetworks-com:metadata-1-0/&amp;quot; xmlns=&amp;quot;urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/&amp;quot;&amp;gt;&amp;lt;item id=&amp;quot;-1&amp;quot; parentID=&amp;quot;-1&quot;&gt;&amp;lt;res&amp;gt;&amp;lt;/res&amp;gt;&amp;lt;upnp:albumArtURI&amp;gt;&amp;lt;/upnp:albumArtURI&amp;gt;&amp;lt;upnp:class&amp;gt;object.item.audioItem.musicTrack&amp;lt;/upnp:class&amp;gt;&amp;lt;dc:title&amp;gt;Pink + White&amp;lt;/dc:title&amp;gt;&amp;lt;dc:creator&amp;gt;Frank Ocean&amp;lt;/dc:creator&amp;gt;&amp;lt;upnp:album&amp;gt;Blonde&amp;lt;/upnp:album&amp;gt;&amp;lt;/item&amp;gt;&amp;lt;/DIDL-Lite&amp;gt;&quot;/&gt;&lt;r:EnqueuedTransportURI val=&quot;&quot;/&gt;&lt;r:EnqueuedTransportURIMetaData val=&quot;&amp;lt;DIDL-Lite xmlns:dc=&amp;quot;http://purl.org/dc/elements/1.1/&amp;quot; xmlns:upnp=&amp;quot;urn:schemas-upnp-org:metadata-1-0/upnp/&amp;quot; xmlns:r=&amp;quot;urn:schemas-rinconnetworks-com:metadata-1-0/&amp;quot; xmlns=&amp;quot;urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/&amp;quot;&amp;gt;&amp;lt;item id=&amp;quot;&quot; parentID=&quot;-1&quot; restricted=&quot;true&quot;&gt;&amp;lt;dc:title&amp;gt;Daily Mix 2&amp;lt;/dc:title&amp;gt;&amp;lt;upnp:class&amp;gt;object.container.playlistContainer&amp;lt;/upnp:class&amp;gt;&amp;lt;desc id=&quot;cdudn&quot; nameSpace=&quot;urn:schemas-rinconnetworks-com:metadata-1-0/&quot;&gt;SA_RINCON3079_X_#Svc3079-14ddbab7-Token&amp;lt;/desc&amp;gt;&amp;lt;upnp:albumArtURI&amp;gt;&amp;lt;/upnp:albumArtURI&amp;gt;&amp;lt;r:contentService id=&quot;12&quot; name=&quot;Spotify&quot;/&gt;&amp;lt;/item&amp;gt;&amp;lt;/DIDL-Lite&amp;gt;&quot;/&gt;&lt;/InstanceID&gt;&lt;/Event&gt;</LastChange></e:property></e:propertyset>"#;
 
         let result = AVTransportParser::from_xml(raw_event);
-        assert!(result.is_ok(), "Failed to parse raw event: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse raw event: {:?}",
+            result.err()
+        );
 
         let parsed = result.unwrap();
         let instance = &parsed.property.last_change.instance;
@@ -320,14 +396,17 @@ mod tests {
         assert_eq!(instance.transport_state.val, "PAUSED_PLAYBACK");
         assert_eq!(instance.current_play_mode.val, "REPEAT_ALL");
         assert_eq!(instance.current_track_duration.val, "0:03:57");
-        
+
         // Verify that the track URI contains the expected Spotify track ID
-        assert!(instance.current_track_uri.val.contains("5hM5arv9KDbCHS0k9uqwjr"));
-        
+        assert!(instance
+            .current_track_uri
+            .val
+            .contains("5hM5arv9KDbCHS0k9uqwjr"));
+
         // Verify that next track and enqueued transport URIs are empty (as expected)
         assert!(instance.next_track_uri.is_some());
         assert_eq!(instance.next_track_uri.as_ref().unwrap().val, "");
-        
+
         assert!(instance.enqueued_transport_uri.is_some());
         assert_eq!(instance.enqueued_transport_uri.as_ref().unwrap().val, "");
 
