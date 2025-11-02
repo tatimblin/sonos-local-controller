@@ -1,6 +1,13 @@
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(bound = "T: serde::de::DeserializeOwned")]
+pub struct NestedAttribute<T> {
+    #[serde(rename = "@val", deserialize_with = "crate::xml_decode::xml_decode::deserialize_nested_safe")]
+    pub val: Option<T>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ValueAttribute {
   #[serde(rename = "@val")]
   pub val: String,

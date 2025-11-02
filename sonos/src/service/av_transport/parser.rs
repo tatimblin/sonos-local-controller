@@ -1,4 +1,4 @@
-use crate::{models::TrackInfo, xml_decode::ValueAttribute, PlaybackState};
+use crate::{PlaybackState, models::TrackInfo, xml_decode::{NestedAttribute, ValueAttribute}};
 
 use serde::Deserialize;
 
@@ -56,7 +56,7 @@ pub struct InstanceID {
     pub current_track_duration: ValueAttribute,
 
     #[serde(rename = "CurrentTrackMetaData")]
-    pub current_track_metadata: ValueAttribute2,
+    pub current_track_metadata: NestedAttribute<DidlLite>,
 
     #[serde(rename = "NextTrackURI", default)]
     pub next_track_uri: Option<ValueAttribute>,
@@ -114,12 +114,6 @@ pub struct InstanceID {
 
     #[serde(rename = "AbsoluteCounterPosition", default)]
     pub absolute_counter_position: Option<ValueAttribute>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ValueAttribute2 {
-    #[serde(rename = "@val", deserialize_with = "crate::xml_decode::xml_decode::deserialize_nested_safe")]
-    pub val: Option<DidlLite>,
 }
 
 // DIDL-Lite metadata structure
