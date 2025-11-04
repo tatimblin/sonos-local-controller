@@ -346,7 +346,8 @@ impl SubscriptionManager {
                 .count()
         };
 
-        if existing_per_speaker_subscriptions >= per_speaker_services.len() {
+        // Only skip if we have PerSpeaker services configured AND they're all already created
+        if !per_speaker_services.is_empty() && existing_per_speaker_subscriptions >= per_speaker_services.len() {
             log::info!(
                 "Speaker {} already has all {} required PerSpeaker subscriptions, skipping creation to prevent duplicates.",
                 speaker.name,
@@ -401,6 +402,7 @@ impl SubscriptionManager {
             if service_type.subscription_scope() == SubscriptionScope::NetworkWide {
                 total_attempts += 1;
                 // Simplified network-wide service handling
+                println!("🌐 Attempting to create {:?} network-wide subscription for speaker {}", service_type, speaker.name);
                 match self.create_simple_network_wide_subscription(speaker, *service_type, subscription_config.clone()) {
                     Ok(Some(subscription_id)) => {
                         subscription_ids.push(subscription_id);
@@ -799,12 +801,18 @@ impl SubscriptionManager {
         };
 
         // Establish the subscription with the device
+        println!("🔗 Attempting to subscribe to {:?} service on speaker {}", service_type, speaker.name);
         let _actual_subscription_id = subscription.subscribe()?;
+        println!("✅ Successfully subscribed to {:?} service, got SID from device", service_type);
 
         // Register with callback server using the original subscription ID (from callback URL)
         if let Some(callback_server) = self.callback_server.read().unwrap().as_ref() {
             let callback_path = format!("/callback/{}", subscription_id);
+            println!("📝 Registering subscription {} with callback path: {}", subscription_id, callback_path);
             callback_server.register_subscription(subscription_id, callback_path)?;
+            println!("✅ Successfully registered subscription {} with callback server", subscription_id);
+        } else {
+            println!("❌ No callback server available for subscription registration!");
         }
 
         // Store the subscription using the original subscription ID
@@ -945,7 +953,9 @@ impl SubscriptionManager {
         }
 
         // Create subscriptions for all enabled services (only for new speakers)
+        println!("🔧 Creating subscriptions for speaker: {}", speaker.name);
         let subscription_ids = self.create_subscriptions_for_speaker(&speaker)?;
+        println!("🎯 Created {} subscriptions for speaker: {}", subscription_ids.len(), speaker.name);
 
         log::info!(
             "Added new speaker {} with {} subscriptions",

@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("🚀 Starting event stream builder...");
             match builder
-                .with_services(&[ServiceType::RenderingControl])
+                .with_services(&[ServiceType::ZoneGroupTopology])
                 .with_event_handler({
                     let event_count = event_count.clone();
                     move |event| {

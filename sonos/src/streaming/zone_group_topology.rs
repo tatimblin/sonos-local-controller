@@ -905,6 +905,8 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
     fn parse_event(&self, event_xml: &str) -> SubscriptionResult<Vec<StateChange>> {
         println!("🔍 Parsing ZoneGroupTopology event...");
 
+        println!("ZONE GROUP TOPOLOGY: {:?}", event_xml);
+
         // Parse the zone group state from the event with comprehensive error handling
         let new_groups = match self.parse_zone_group_state(event_xml) {
             Ok(groups) => groups,
