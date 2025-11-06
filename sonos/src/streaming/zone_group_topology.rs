@@ -1,6 +1,8 @@
 use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
 use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use crate::models::{Group, GroupId, Speaker, SpeakerId, StateChange};
+use crate::service::zone_group_topology;
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -767,6 +769,36 @@ impl ZoneGroupTopologySubscription {
         changes
     }
 
+    /// Convert parsed zone groups from the parser to our Group model
+    fn convert_parsed_groups(&self, parsed_groups: &[zone_group_topology::parser::ZoneGroup]) -> Vec<Group> {
+        let mut groups = Vec::new();
+        
+        for parsed_group in parsed_groups {
+            let coordinator_id = SpeakerId::from_udn(&format!("uuid:{}", parsed_group.coordinator));
+            let mut group = Group::new(coordinator_id);
+            
+            // Add all members to the group
+            for member in &parsed_group.zone_group_members {
+                let member_id = SpeakerId::from_udn(&format!("uuid:{}", member.uuid));
+                
+                // Convert satellites
+                let satellites: Vec<SpeakerId> = member.satellites
+                    .iter()
+                    .map(|sat| SpeakerId::from_udn(&format!("uuid:{}", sat.uuid)))
+                    .collect();
+                
+                group.add_member_with_satellites(member_id, satellites);
+            }
+            
+            if group.member_count() > 0 {
+                groups.push(group);
+            }
+        }
+        
+        println!("✅ Converted {} parsed groups to Group model", groups.len());
+        groups
+    }
+
     /// Analyze detailed changes between old and new topology states
     fn analyze_topology_changes(
         &self,
@@ -903,32 +935,37 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
     }
 
     fn parse_event(&self, event_xml: &str) -> SubscriptionResult<Vec<StateChange>> {
-        println!("🔍 Parsing ZoneGroupTopology event...");
+        let mut changes = Vec::new();
+        
+        // Validate input
+        if event_xml.is_empty() {
+            println!("⚠️  Received empty event XML, returning no changes");
+            return Ok(Vec::new());
+        }
 
-        println!("ZONE GROUP TOPOLOGY: {:?}", event_xml);
-
-        // Parse the zone group state from the event with comprehensive error handling
-        let new_groups = match self.parse_zone_group_state(event_xml) {
-            Ok(groups) => groups,
+        match zone_group_topology::parser::ZoneGroupTopologyParser::from_xml(event_xml) {
+            Ok(parser) => {
+                println!("🔍 Parsing ZoneGroupTopology event...");
+                
+                // Convert parsed data to our Group model
+                let new_groups = self.convert_parsed_groups(&parser.zone_group_state.zone_group_state.zone_groups.zone_groups);
+                
+                // Detect changes and generate appropriate StateChange events
+                changes = self.detect_topology_changes(&new_groups);
+                
+                println!("✅ Generated {} state changes from ZoneGroupTopology event", changes.len());
+            }
             Err(e) => {
                 println!("❌ Failed to parse ZoneGroupTopology XML: {}", e);
-                // Log the error but don't fail completely - return empty changes
-                // This allows the system to continue processing other events
-                return Ok(vec![StateChange::SubscriptionError {
+                // Log the error but don't fail completely - return subscription error
+                changes.push(StateChange::SubscriptionError {
                     speaker_id: self.representative_speaker.id,
                     service: ServiceType::ZoneGroupTopology,
                     error: format!("XML parsing failed: {}", e),
-                }]);
+                });
             }
-        };
+        }
 
-        // Detect changes and generate appropriate StateChange events
-        let changes = self.detect_topology_changes(&new_groups);
-
-        println!(
-            "✅ Generated {} state changes from ZoneGroupTopology event",
-            changes.len()
-        );
         Ok(changes)
     }
 
