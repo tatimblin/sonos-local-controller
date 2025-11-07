@@ -25,13 +25,13 @@ pub struct ZoneGroupState {
     pub vanished_devices: VanishedDevices,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ZoneGroups {
     #[serde(rename = "ZoneGroup", default)]
     pub zone_groups: Vec<ZoneGroup>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ZoneGroup {
     #[serde(rename = "@Coordinator")]
     pub coordinator: String,
@@ -41,7 +41,7 @@ pub struct ZoneGroup {
     pub zone_group_members: Vec<ZoneGroupMember>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ZoneGroupMember {
     #[serde(rename = "@UUID")]
     pub uuid: String,
@@ -111,7 +111,7 @@ pub struct ZoneGroupMember {
     pub satellites: Vec<Satellite>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Satellite {
     #[serde(rename = "@UUID")]
     pub uuid: String,

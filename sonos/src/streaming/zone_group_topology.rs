@@ -1,9 +1,12 @@
 use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
 use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
-use crate::models::{Group, GroupId, Speaker, SpeakerId, StateChange};
-use crate::service::zone_group_topology;
+use crate::models::{GroupId, Speaker, SpeakerId, StateChange};
+use crate::service::zone_group_topology::topology_changes::TopologyChanges;
+use crate::service::zone_group_topology::topology_snapshot::TopologySnapshot;
+use crate::service::zone_group_topology::{self, topology_changes, topology_snapshot};
+use crate::service::zone_group_topology::parser::ZoneGroups;
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
@@ -29,847 +32,339 @@ pub struct ZoneGroupTopologySubscription {
     /// Timestamp of the last successful renewal
     last_renewal: Option<SystemTime>,
     /// Last known zone group state for change detection (using Mutex for thread-safe interior mutability)
-    last_zone_groups: Mutex<Option<Vec<Group>>>,
+    last_zone_topology: Mutex<Option<zone_group_topology::parser::ZoneGroups>>,
 }
 
 impl ZoneGroupTopologySubscription {
-    /// Create a new ZoneGroupTopology subscription
-    ///
-    /// # Arguments
-    /// * `representative_speaker` - The speaker to use for the subscription endpoint
-    /// * `callback_url` - URL where the device should send event notifications
-    /// * `config` - Configuration for this subscription
-    pub fn new(
-        representative_speaker: Speaker,
-        callback_url: String,
-        config: SubscriptionConfig,
-    ) -> SubscriptionResult<Self> {
-        Ok(Self {
-            representative_speaker,
-            subscription_id: None,
-            upnp_sid: None,
-            callback_url,
-            config,
-            active: false,
-            last_renewal: None,
-            last_zone_groups: Mutex::new(None),
+  /// Create a new ZoneGroupTopology subscription
+  ///
+  /// # Arguments
+  /// * `representative_speaker` - The speaker to use for the subscription endpoint
+  /// * `callback_url` - URL where the device should send event notifications
+  /// * `config` - Configuration for this subscription
+  pub fn new(
+      representative_speaker: Speaker,
+      callback_url: String,
+      config: SubscriptionConfig,
+  ) -> SubscriptionResult<Self> {
+      Ok(Self {
+          representative_speaker,
+          subscription_id: None,
+          upnp_sid: None,
+          callback_url,
+          config,
+          active: false,
+          last_renewal: None,
+          last_zone_topology: Mutex::new(None),
+      })
+  }
+
+  /// Get the device URL for the representative speaker
+  fn device_url(&self) -> String {
+      format!(
+          "http://{}:{}",
+          self.representative_speaker.ip_address, self.representative_speaker.port
+      )
+  }
+
+  /// Send a UPnP SUBSCRIBE request to establish the subscription
+  fn send_subscribe_request(&self) -> SubscriptionResult<String> {
+      let device_url = self.device_url();
+      let event_sub_url = ServiceType::ZoneGroupTopology.event_sub_url();
+      let full_url = format!("{}{}", device_url, event_sub_url);
+
+      println!(
+          "📡 Sending ZoneGroupTopology SUBSCRIBE request to: {}",
+          full_url
+      );
+      println!("   Callback URL: {}", self.callback_url);
+
+      // Create HTTP client for subscription requests with timeout
+      let client = reqwest::blocking::Client::builder()
+          .timeout(std::time::Duration::from_secs(10))
+          .build()
+          .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
+
+      println!("🔄 Making HTTP SUBSCRIBE request...");
+      let response = client
+          .request(
+              reqwest::Method::from_bytes(b"SUBSCRIBE").unwrap(),
+              &full_url,
+          )
+          .header(
+              "HOST",
+              format!(
+                  "{}:{}",
+                  self.representative_speaker.ip_address, self.representative_speaker.port
+              ),
+          )
+          .header("CALLBACK", format!("<{}>", self.callback_url))
+          .header("NT", "upnp:event")
+          .header("TIMEOUT", format!("Second-{}", self.config.timeout_seconds))
+          .send()
+          .map_err(|e| {
+              println!("❌ HTTP request failed: {}", e);
+              SubscriptionError::NetworkError(e.to_string())
+          })?;
+
+      if !response.status().is_success() {
+          return match response.status().as_u16() {
+              503 => {
+                  // Don't print error message here - let the caller handle satellite speaker detection
+                  Err(SubscriptionError::SatelliteSpeaker)
+              }
+              _ => {
+                  let error_msg = format!(
+                      "HTTP {} - {}",
+                      response.status(),
+                      response.status().canonical_reason().unwrap_or("Unknown")
+                  );
+                  Err(SubscriptionError::SubscriptionFailed(error_msg))
+              }
+          };
+      }
+
+      // Extract SID from response headers
+      let sid = response
+          .headers()
+          .get("SID")
+          .and_then(|v| v.to_str().ok())
+          .ok_or_else(|| {
+              SubscriptionError::SubscriptionFailed("No SID in response".to_string())
+          })?;
+
+      Ok(sid.to_string())
+  }
+
+  /// Send a UPnP UNSUBSCRIBE request to terminate the subscription
+  fn send_unsubscribe_request(&self, sid: &str) -> SubscriptionResult<()> {
+      let device_url = self.device_url();
+      let event_sub_url = ServiceType::ZoneGroupTopology.event_sub_url();
+      let full_url = format!("{}{}", device_url, event_sub_url);
+
+      let client = reqwest::blocking::Client::builder()
+          .timeout(std::time::Duration::from_secs(10))
+          .build()
+          .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
+
+      let response = client
+          .request(
+              reqwest::Method::from_bytes(b"UNSUBSCRIBE").unwrap(),
+              &full_url,
+          )
+          .header(
+              "HOST",
+              format!(
+                  "{}:{}",
+                  self.representative_speaker.ip_address, self.representative_speaker.port
+              ),
+          )
+          .header("SID", sid)
+          .send()
+          .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
+
+      if !response.status().is_success() {
+          return Err(SubscriptionError::SubscriptionFailed(format!(
+              "UNSUBSCRIBE failed: HTTP {}",
+              response.status()
+          )));
+      }
+
+      Ok(())
+  }
+
+  /// Send a subscription renewal request
+  fn send_renewal_request(&self, sid: &str) -> SubscriptionResult<()> {
+      let device_url = self.device_url();
+      let event_sub_url = ServiceType::ZoneGroupTopology.event_sub_url();
+      let full_url = format!("{}{}", device_url, event_sub_url);
+
+      let client = reqwest::blocking::Client::builder()
+          .timeout(std::time::Duration::from_secs(10))
+          .build()
+          .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
+
+      let response = client
+          .request(
+              reqwest::Method::from_bytes(b"SUBSCRIBE").unwrap(),
+              &full_url,
+          )
+          .header(
+              "HOST",
+              format!(
+                  "{}:{}",
+                  self.representative_speaker.ip_address, self.representative_speaker.port
+              ),
+          )
+          .header("SID", sid)
+          .header("TIMEOUT", format!("Second-{}", self.config.timeout_seconds))
+          .send()
+          .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
+
+      if !response.status().is_success() {
+          return Err(SubscriptionError::SubscriptionFailed(format!(
+              "Renewal failed: HTTP {}",
+              response.status()
+          )));
+      }
+
+      Ok(())
+  }
+
+  /// Detect changes between old and new zone group states
+  fn detect_topology_changes(&self, new_topology: &ZoneGroups) -> Vec<StateChange> {
+    let mut last_topology = self.last_zone_topology.lock().unwrap();
+
+    let changes = match last_topology.as_ref() {
+      None => topology_changes::TopologyChanges::new(),
+      Some(old_topology) => {
+        self.compute_changes(old_topology, new_topology)
+      }
+    };
+
+    *last_topology = Some(new_topology.clone());
+
+    let changes = changes.into_vec();
+    changes
+  }
+
+  fn compute_changes(&self, old_topology: &ZoneGroups, new_topology: &ZoneGroups) -> topology_changes::TopologyChanges {
+    let old_snapshot = topology_snapshot::TopologySnapshot::from_parser(old_topology);
+    let new_snapshot = topology_snapshot::TopologySnapshot::from_parser(new_topology);
+
+    let mut changes = TopologyChanges::new();
+
+    self.detect_group_formations(&old_snapshot, &new_snapshot, &mut changes);
+    self.detect_group_dissolutions(&old_snapshot, &new_snapshot, &mut changes);
+    self.detect_membership_changes(&old_snapshot, &new_snapshot, &mut changes);
+    self.detect_coordinator_changes(&old_snapshot, &new_snapshot, &mut changes);
+
+    changes
+  }
+
+  fn detect_group_formations(
+    &self,
+    old: &TopologySnapshot,
+    new: &TopologySnapshot,
+    changes: &mut TopologyChanges
+  ) {
+    for (group_id, (coordinator_id, members)) in &new.groups {
+      if !old.groups.contains_key(group_id) {
+        changes.add(StateChange::GroupFormed {
+          group_id: *group_id,
+          coordinator_id: *coordinator_id,
+          initial_members: members.iter().copied().collect(),
+        });
+      }
+    }
+  }
+
+  fn detect_group_dissolutions(
+    &self,
+    old: &TopologySnapshot,
+    new: &TopologySnapshot,
+    changes: &mut TopologyChanges,
+  ) {
+    for (group_id, (coordinator_id, members)) in &old.groups {
+      if !new.groups.contains_key(group_id) {
+        changes.add(StateChange::GroupDissolved {
+          group_id: *group_id,
+          former_coordinator: *coordinator_id,
+          former_members: members.iter().copied().collect()
         })
+      }
     }
+  }
 
-    /// Get the device URL for the representative speaker
-    fn device_url(&self) -> String {
-        format!(
-            "http://{}:{}",
-            self.representative_speaker.ip_address, self.representative_speaker.port
-        )
+  fn detect_membership_changes(
+    &self,
+    old: &TopologySnapshot,
+    new: &TopologySnapshot,
+    changes: &mut TopologyChanges,
+  ) {
+    let old_speaker_map = old.get_speaker_group_map();
+    let new_speaker_map = new.get_speaker_group_map();
+
+    let all_speakers: HashSet<_> = old_speaker_map.keys()
+      .chain(new_speaker_map.keys())
+      .copied()
+      .collect();
+
+    for speaker_id in all_speakers {
+      let old_group = old_speaker_map.get(&speaker_id);
+      let new_group = new_speaker_map.get(&speaker_id);
+
+      match (old_group, new_group) {
+        (Some(old_gid), Some(new_gid)) if old_gid != new_gid => {
+          // Speaker moved between groups
+          self.handle_speaker_left(*old_gid, speaker_id, changes);
+          self.handle_speaker_joined(*new_gid, speaker_id, new, changes);
+        }
+        (Some(old_gid), None) => {
+          // Speaker left group (became solo)
+          self.handle_speaker_left(*old_gid, speaker_id, changes);
+        }
+        (None, Some(new_gid)) => {
+          // Speaker joined group (was solo)
+          self.handle_speaker_joined(*new_gid, speaker_id, new, changes);
+        }
+        _ => {
+          // No change (same group or still solo)
+        }
+      }
     }
+  }
 
-    /// Send a UPnP SUBSCRIBE request to establish the subscription
-    fn send_subscribe_request(&self) -> SubscriptionResult<String> {
-        let device_url = self.device_url();
-        let event_sub_url = ServiceType::ZoneGroupTopology.event_sub_url();
-        let full_url = format!("{}{}", device_url, event_sub_url);
+  fn handle_speaker_left(
+    &self,
+    group_id: GroupId,
+    speaker_id: SpeakerId,
+    changes: &mut TopologyChanges,
+  ) {
+    changes.add(StateChange::SpeakerLeftGroup {
+      speaker_id,
+      former_group_id: group_id,
+    });
+  }
 
-        println!(
-            "📡 Sending ZoneGroupTopology SUBSCRIBE request to: {}",
-            full_url
-        );
-        println!("   Callback URL: {}", self.callback_url);
+  fn handle_speaker_joined(
+    &self,
+    group_id: GroupId,
+    speaker_id: SpeakerId,
+    snapshot: &TopologySnapshot,
+    changes: &mut TopologyChanges,
+  ) {
+    let coordinator_id = snapshot.groups
+      .get(&group_id)
+      .map(|(coordinator, _)| *coordinator)
+      .unwrap_or(speaker_id);
 
-        // Create HTTP client for subscription requests with timeout
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
+    changes.add(StateChange::SpeakerJoinedGroup {
+      speaker_id,
+      group_id,
+      coordinator_id,
+    });
+  }
 
-        println!("🔄 Making HTTP SUBSCRIBE request...");
-        let response = client
-            .request(
-                reqwest::Method::from_bytes(b"SUBSCRIBE").unwrap(),
-                &full_url,
-            )
-            .header(
-                "HOST",
-                format!(
-                    "{}:{}",
-                    self.representative_speaker.ip_address, self.representative_speaker.port
-                ),
-            )
-            .header("CALLBACK", format!("<{}>", self.callback_url))
-            .header("NT", "upnp:event")
-            .header("TIMEOUT", format!("Second-{}", self.config.timeout_seconds))
-            .send()
-            .map_err(|e| {
-                println!("❌ HTTP request failed: {}", e);
-                SubscriptionError::NetworkError(e.to_string())
-            })?;
-
-        if !response.status().is_success() {
-            return match response.status().as_u16() {
-                503 => {
-                    // Don't print error message here - let the caller handle satellite speaker detection
-                    Err(SubscriptionError::SatelliteSpeaker)
-                }
-                _ => {
-                    let error_msg = format!(
-                        "HTTP {} - {}",
-                        response.status(),
-                        response.status().canonical_reason().unwrap_or("Unknown")
-                    );
-                    Err(SubscriptionError::SubscriptionFailed(error_msg))
-                }
-            };
+  /// Detect coordinator changes within existing groups
+  fn detect_coordinator_changes(
+    &self,
+    old: &TopologySnapshot,
+    new: &TopologySnapshot,
+    changes: &mut TopologyChanges,
+  ) {
+    for (group_id, (new_coordinator, _)) in &new.groups {
+      if let Some((old_coordinator, _)) = old.groups.get(group_id) {
+        if old_coordinator != new_coordinator {
+          changes.add(StateChange::CoordinatorChanged {
+            group_id: *group_id,
+            old_coordinator: *old_coordinator,
+            new_coordinator: *new_coordinator,
+          });
         }
-
-        // Extract SID from response headers
-        let sid = response
-            .headers()
-            .get("SID")
-            .and_then(|v| v.to_str().ok())
-            .ok_or_else(|| {
-                SubscriptionError::SubscriptionFailed("No SID in response".to_string())
-            })?;
-
-        Ok(sid.to_string())
+      }
     }
-
-    /// Send a UPnP UNSUBSCRIBE request to terminate the subscription
-    fn send_unsubscribe_request(&self, sid: &str) -> SubscriptionResult<()> {
-        let device_url = self.device_url();
-        let event_sub_url = ServiceType::ZoneGroupTopology.event_sub_url();
-        let full_url = format!("{}{}", device_url, event_sub_url);
-
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
-
-        let response = client
-            .request(
-                reqwest::Method::from_bytes(b"UNSUBSCRIBE").unwrap(),
-                &full_url,
-            )
-            .header(
-                "HOST",
-                format!(
-                    "{}:{}",
-                    self.representative_speaker.ip_address, self.representative_speaker.port
-                ),
-            )
-            .header("SID", sid)
-            .send()
-            .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
-
-        if !response.status().is_success() {
-            return Err(SubscriptionError::SubscriptionFailed(format!(
-                "UNSUBSCRIBE failed: HTTP {}",
-                response.status()
-            )));
-        }
-
-        Ok(())
-    }
-
-    /// Send a subscription renewal request
-    fn send_renewal_request(&self, sid: &str) -> SubscriptionResult<()> {
-        let device_url = self.device_url();
-        let event_sub_url = ServiceType::ZoneGroupTopology.event_sub_url();
-        let full_url = format!("{}{}", device_url, event_sub_url);
-
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
-
-        let response = client
-            .request(
-                reqwest::Method::from_bytes(b"SUBSCRIBE").unwrap(),
-                &full_url,
-            )
-            .header(
-                "HOST",
-                format!(
-                    "{}:{}",
-                    self.representative_speaker.ip_address, self.representative_speaker.port
-                ),
-            )
-            .header("SID", sid)
-            .header("TIMEOUT", format!("Second-{}", self.config.timeout_seconds))
-            .send()
-            .map_err(|e| SubscriptionError::NetworkError(e.to_string()))?;
-
-        if !response.status().is_success() {
-            return Err(SubscriptionError::SubscriptionFailed(format!(
-                "Renewal failed: HTTP {}",
-                response.status()
-            )));
-        }
-
-        Ok(())
-    }
-
-    /// Parse ZoneGroupTopology XML and extract group information
-    pub fn parse_zone_group_state(&self, xml: &str) -> SubscriptionResult<Vec<Group>> {
-        println!("🔍 Parsing ZoneGroupTopology XML...");
-        println!("   XML length: {} bytes", xml.len());
-        
-        if xml.is_empty() {
-            return Err(SubscriptionError::EventParseError(
-                "Empty XML content".to_string(),
-            ));
-        }
-
-        println!(
-            "   XML preview: {}",
-            xml.chars().take(200).collect::<String>()
-        );
-
-        let mut groups = Vec::new();
-
-        // Look for ZoneGroupState in the event XML
-        match self.extract_property_value(xml, "ZoneGroupState") {
-            Some(zone_group_state_xml) => {
-                println!("✅ Found ZoneGroupState content");
-
-                if zone_group_state_xml.trim().is_empty() {
-                    println!("⚠️ ZoneGroupState content is empty");
-                    return Ok(groups);
-                }
-
-                // Decode XML entities in the ZoneGroupState content
-                let decoded_xml = self.decode_xml_entities(&zone_group_state_xml);
-                println!("🔍 Decoded ZoneGroupState:");
-                println!("   {}", decoded_xml.chars().take(300).collect::<String>());
-
-                // Parse each ZoneGroup element with error handling
-                groups = self.parse_zone_groups(&decoded_xml).map_err(|e| {
-                    SubscriptionError::EventParseError(format!(
-                        "Failed to parse ZoneGroups: {}",
-                        e
-                    ))
-                })?;
-            }
-            None => {
-                println!("❌ No ZoneGroupState found in XML");
-                // This might be a different type of event or malformed XML
-                // Check if this is a valid UPnP event structure
-                if !xml.contains("<property>") && !xml.contains("<e:property>") {
-                    return Err(SubscriptionError::EventParseError(
-                        "Invalid UPnP event structure - no property elements found".to_string(),
-                    ));
-                }
-                // If it's a valid UPnP event but no ZoneGroupState, return empty groups
-                println!("ℹ️ Valid UPnP event but no ZoneGroupState property");
-            }
-        }
-
-        println!("✅ Successfully parsed {} groups", groups.len());
-        Ok(groups)
-    }
-
-    /// Parse ZoneGroup elements from the decoded XML
-    fn parse_zone_groups(&self, xml: &str) -> SubscriptionResult<Vec<Group>> {
-        let mut groups = Vec::new();
-        let mut search_pos = 0;
-        let mut group_count = 0;
-
-        // Handle empty ZoneGroups case
-        if !xml.contains("<ZoneGroup") {
-            println!("ℹ️ No ZoneGroup elements found in XML");
-            return Ok(groups);
-        }
-
-        // Find all ZoneGroup elements
-        while let Some(zone_group_start) = xml[search_pos..].find("<ZoneGroup") {
-            let zone_group_start_abs = search_pos + zone_group_start;
-            group_count += 1;
-
-            // Prevent infinite loops with a reasonable limit
-            if group_count > 100 {
-                return Err(SubscriptionError::EventParseError(
-                    "Too many ZoneGroup elements found (>100), possible malformed XML".to_string(),
-                ));
-            }
-
-            // Find the end of this ZoneGroup element
-            if let Some(zone_group_end) = xml[zone_group_start_abs..].find("</ZoneGroup>") {
-                let zone_group_end_abs =
-                    zone_group_start_abs + zone_group_end + "</ZoneGroup>".len();
-                let zone_group_xml = &xml[zone_group_start_abs..zone_group_end_abs];
-
-                // Parse this individual ZoneGroup with error handling
-                match self.parse_single_zone_group(zone_group_xml) {
-                    Ok(Some(group)) => {
-                        groups.push(group);
-                        println!("✅ Successfully parsed group {}", group_count);
-                    }
-                    Ok(None) => {
-                        println!("⚠️ Skipped empty or invalid group {}", group_count);
-                    }
-                    Err(e) => {
-                        println!("❌ Failed to parse group {}: {}", group_count, e);
-                        // Continue parsing other groups instead of failing completely
-                        // This makes the system more resilient to partial XML corruption
-                    }
-                }
-
-                search_pos = zone_group_end_abs;
-            } else {
-                // Check if this is a self-closing ZoneGroup tag
-                if let Some(self_close_end) = xml[zone_group_start_abs..].find("/>") {
-                    let zone_group_end_abs = zone_group_start_abs + self_close_end + 2;
-                    let zone_group_xml = &xml[zone_group_start_abs..zone_group_end_abs];
-
-                    // Parse this self-closing ZoneGroup
-                    match self.parse_single_zone_group(zone_group_xml) {
-                        Ok(Some(group)) => {
-                            groups.push(group);
-                            println!("✅ Successfully parsed self-closing group {}", group_count);
-                        }
-                        Ok(None) => {
-                            println!("⚠️ Skipped empty self-closing group {}", group_count);
-                        }
-                        Err(e) => {
-                            println!("❌ Failed to parse self-closing group {}: {}", group_count, e);
-                        }
-                    }
-
-                    search_pos = zone_group_end_abs;
-                } else {
-                    // Malformed XML - missing closing tag
-                    println!("❌ Malformed ZoneGroup XML - missing closing tag at position {}", zone_group_start_abs);
-                    return Err(SubscriptionError::EventParseError(
-                        "Malformed ZoneGroup XML - missing closing tag".to_string(),
-                    ));
-                }
-            }
-        }
-
-        println!("✅ Parsed {} zone groups from {} found", groups.len(), group_count);
-        Ok(groups)
-    }
-
-    /// Parse a single ZoneGroup element
-    fn parse_single_zone_group(&self, zone_group_xml: &str) -> SubscriptionResult<Option<Group>> {
-        if zone_group_xml.trim().is_empty() {
-            return Ok(None);
-        }
-
-        // Extract coordinator from ZoneGroup attributes
-        let coordinator_uuid = self.extract_attribute(zone_group_xml, "Coordinator")
-            .map_err(|e| {
-                SubscriptionError::EventParseError(format!(
-                    "Failed to extract Coordinator attribute: {}",
-                    e
-                ))
-            })?;
-
-        if coordinator_uuid.trim().is_empty() {
-            return Err(SubscriptionError::EventParseError(
-                "Empty Coordinator UUID found".to_string(),
-            ));
-        }
-
-        let coordinator_id = SpeakerId::from_udn(&format!("uuid:{}", coordinator_uuid));
-
-        println!(
-            "🔍 Parsing ZoneGroup with coordinator: {}",
-            coordinator_uuid
-        );
-
-        let mut group = Group::new(coordinator_id);
-        let mut search_pos = 0;
-        let mut member_count = 0;
-
-        // Find all ZoneGroupMember elements
-        while let Some(member_start) = zone_group_xml[search_pos..].find("<ZoneGroupMember") {
-            let member_start_abs = search_pos + member_start;
-            member_count += 1;
-
-            // Prevent infinite loops
-            if member_count > 50 {
-                return Err(SubscriptionError::EventParseError(
-                    "Too many ZoneGroupMember elements (>50), possible malformed XML".to_string(),
-                ));
-            }
-
-            // Find the end of this member element (self-closing tag)
-            if let Some(member_end) = zone_group_xml[member_start_abs..].find("/>") {
-                let member_end_abs = member_start_abs + member_end + 2;
-                let member_xml = &zone_group_xml[member_start_abs..member_end_abs];
-
-                // Parse this member with error handling
-                match self.parse_zone_group_member(member_xml) {
-                    Ok(Some((speaker_id, satellites))) => {
-                        group.add_member_with_satellites(speaker_id, satellites);
-                        println!("✅ Added member {:?} to group", speaker_id);
-                    }
-                    Ok(None) => {
-                        println!("⚠️ Skipped invalid member {}", member_count);
-                    }
-                    Err(e) => {
-                        println!("❌ Failed to parse member {}: {}", member_count, e);
-                        // Continue with other members instead of failing completely
-                    }
-                }
-
-                search_pos = member_end_abs;
-            } else {
-                // Look for non-self-closing member tags
-                if let Some(member_close) = zone_group_xml[member_start_abs..].find("</ZoneGroupMember>") {
-                    let member_end_abs = member_start_abs + member_close + "</ZoneGroupMember>".len();
-                    let member_xml = &zone_group_xml[member_start_abs..member_end_abs];
-
-                    // Parse this member
-                    match self.parse_zone_group_member(member_xml) {
-                        Ok(Some((speaker_id, satellites))) => {
-                            group.add_member_with_satellites(speaker_id, satellites);
-                            println!("✅ Added member {:?} to group", speaker_id);
-                        }
-                        Ok(None) => {
-                            println!("⚠️ Skipped invalid member {}", member_count);
-                        }
-                        Err(e) => {
-                            println!("❌ Failed to parse member {}: {}", member_count, e);
-                        }
-                    }
-
-                    search_pos = member_end_abs;
-                } else {
-                    println!("❌ Malformed ZoneGroupMember XML at position {}", member_start_abs);
-                    break;
-                }
-            }
-        }
-
-        if group.member_count() == 0 {
-            println!("⚠️ ZoneGroup has no valid members, skipping");
-            return Ok(None);
-        }
-
-        println!("✅ Successfully parsed ZoneGroup with {} members", group.member_count());
-        Ok(Some(group))
-    }
-
-    /// Parse a single ZoneGroupMember element
-    fn parse_zone_group_member(
-        &self,
-        member_xml: &str,
-    ) -> SubscriptionResult<Option<(SpeakerId, Vec<SpeakerId>)>> {
-        if member_xml.trim().is_empty() {
-            return Ok(None);
-        }
-
-        // Extract UUID from member attributes
-        let uuid = self.extract_attribute(member_xml, "UUID")
-            .map_err(|e| {
-                SubscriptionError::EventParseError(format!(
-                    "Failed to extract UUID from ZoneGroupMember: {}",
-                    e
-                ))
-            })?;
-
-        if uuid.trim().is_empty() {
-            return Err(SubscriptionError::EventParseError(
-                "Empty UUID found in ZoneGroupMember".to_string(),
-            ));
-        }
-
-        let speaker_id = SpeakerId::from_udn(&format!("uuid:{}", uuid));
-
-        // Parse satellites if present in the member XML
-        // Satellites might be encoded in various ways in the ZoneGroupTopology format
-        let satellites = self.parse_member_satellites(member_xml)?;
-
-        if satellites.is_empty() {
-            println!("🔍 Parsed member: {} (no satellites)", uuid);
-        } else {
-            println!("🔍 Parsed member: {} with {} satellites", uuid, satellites.len());
-        }
-
-        Ok(Some((speaker_id, satellites)))
-    }
-
-    /// Parse satellite speakers from a ZoneGroupMember element
-    pub fn parse_member_satellites(&self, member_xml: &str) -> SubscriptionResult<Vec<SpeakerId>> {
-        let mut satellites = Vec::new();
-
-        // Look for satellite information in various possible formats
-        // Format 1: Satellites attribute (comma-separated UUIDs)
-        if let Ok(satellites_attr) = self.extract_attribute(member_xml, "Satellites") {
-            if !satellites_attr.trim().is_empty() {
-                for satellite_uuid in satellites_attr.split(',') {
-                    let uuid = satellite_uuid.trim();
-                    if !uuid.is_empty() {
-                        let satellite_id = SpeakerId::from_udn(&format!("uuid:{}", uuid));
-                        satellites.push(satellite_id);
-                        println!("🔍 Found satellite: {}", uuid);
-                    }
-                }
-            }
-        }
-
-        // Format 2: Look for nested satellite elements
-        let mut search_pos = 0;
-        while let Some(satellite_start) = member_xml[search_pos..].find("<Satellite") {
-            let satellite_start_abs = search_pos + satellite_start;
-            
-            // Check for self-closing satellite tags
-            if let Some(satellite_end) = member_xml[satellite_start_abs..].find("/>") {
-                let satellite_end_abs = satellite_start_abs + satellite_end + 2;
-                let satellite_xml = &member_xml[satellite_start_abs..satellite_end_abs];
-                
-                if let Ok(satellite_uuid) = self.extract_attribute(satellite_xml, "UUID") {
-                    if !satellite_uuid.trim().is_empty() {
-                        let satellite_id = SpeakerId::from_udn(&format!("uuid:{}", satellite_uuid));
-                        satellites.push(satellite_id);
-                        println!("🔍 Found nested satellite: {}", satellite_uuid);
-                    }
-                }
-                
-                search_pos = satellite_end_abs;
-            } else if let Some(satellite_close) = member_xml[satellite_start_abs..].find("</Satellite>") {
-                // Handle non-self-closing satellite tags
-                let satellite_end_abs = satellite_start_abs + satellite_close + "</Satellite>".len();
-                let satellite_xml = &member_xml[satellite_start_abs..satellite_end_abs];
-                
-                if let Ok(satellite_uuid) = self.extract_attribute(satellite_xml, "UUID") {
-                    if !satellite_uuid.trim().is_empty() {
-                        let satellite_id = SpeakerId::from_udn(&format!("uuid:{}", satellite_uuid));
-                        satellites.push(satellite_id);
-                        println!("🔍 Found nested satellite: {}", satellite_uuid);
-                    }
-                }
-                
-                search_pos = satellite_end_abs;
-            } else {
-                break;
-            }
-        }
-
-        Ok(satellites)
-    }
-
-    /// Extract an attribute value from an XML element
-    pub fn extract_attribute(&self, xml: &str, attr_name: &str) -> SubscriptionResult<String> {
-        if xml.trim().is_empty() {
-            return Err(SubscriptionError::EventParseError(
-                "Empty XML provided for attribute extraction".to_string(),
-            ));
-        }
-
-        if attr_name.trim().is_empty() {
-            return Err(SubscriptionError::EventParseError(
-                "Empty attribute name provided".to_string(),
-            ));
-        }
-
-        // Try different quote styles (double and single quotes)
-        let patterns = [
-            format!("{}=\"", attr_name),
-            format!("{}='", attr_name),
-            format!("{} = \"", attr_name),
-            format!("{} = '", attr_name),
-        ];
-
-        for pattern in &patterns {
-            if let Some(attr_start) = xml.find(pattern) {
-                let value_start = attr_start + pattern.len();
-                let quote_char = if pattern.contains('"') { '"' } else { '\'' };
-                
-                if let Some(value_end) = xml[value_start..].find(quote_char) {
-                    let value = &xml[value_start..value_start + value_end];
-                    
-                    // Decode basic XML entities in attribute values
-                    let decoded_value = self.decode_xml_entities(value);
-                    return Ok(decoded_value);
-                }
-            }
-        }
-
-        Err(SubscriptionError::EventParseError(format!(
-            "Missing required attribute '{}' in XML: {}",
-            attr_name,
-            xml.chars().take(100).collect::<String>()
-        )))
-    }
-
-    /// Extract a property value from UPnP event XML
-    pub fn extract_property_value(&self, xml: &str, property_name: &str) -> Option<String> {
-        if xml.trim().is_empty() || property_name.trim().is_empty() {
-            return None;
-        }
-
-        // UPnP events use a specific XML structure with <property> elements
-        let property_patterns = [
-            ("<property>", "</property>"),
-            ("<e:property>", "</e:property>"),
-            ("<s:property>", "</s:property>"), // Some devices use 's:' namespace
-        ];
-
-        let var_patterns = [
-            (format!("<{}>", property_name), format!("</{}>", property_name)),
-        ];
-
-        // Try each property pattern
-        for (property_start, property_end) in &property_patterns {
-            let mut search_pos = 0;
-            while let Some(prop_start) = xml[search_pos..].find(property_start) {
-                let prop_start_abs = search_pos + prop_start;
-                if let Some(prop_end) = xml[prop_start_abs..].find(property_end) {
-                    let prop_end_abs = prop_start_abs + prop_end + property_end.len();
-                    let property_xml = &xml[prop_start_abs..prop_end_abs];
-
-                    // Try each variable pattern within this property block
-                    for (var_start, var_end) in &var_patterns {
-                        if let Some(var_start_pos) = property_xml.find(var_start) {
-                            if let Some(var_end_pos) = property_xml[var_start_pos..].find(var_end) {
-                                let content_start = var_start_pos + var_start.len();
-                                let content_end = var_start_pos + var_end_pos;
-                                
-                                if content_end > content_start {
-                                    let content = &property_xml[content_start..content_end];
-                                    
-                                    // Decode XML entities and return
-                                    let decoded = self.decode_xml_entities(content);
-                                    if !decoded.trim().is_empty() {
-                                        return Some(decoded);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    search_pos = prop_end_abs;
-                } else {
-                    break;
-                }
-            }
-        }
-
-        None
-    }
-
-    /// Decode XML entities and handle CDATA sections
-    pub fn decode_xml_entities(&self, text: &str) -> String {
-        let mut result = text.to_string();
-        
-        // Handle CDATA sections
-        while let Some(cdata_start) = result.find("<![CDATA[") {
-            if let Some(cdata_end) = result[cdata_start..].find("]]>") {
-                let cdata_end_abs = cdata_start + cdata_end;
-                let cdata_content = &result[cdata_start + 9..cdata_end_abs];
-                let before = &result[..cdata_start];
-                let after = &result[cdata_end_abs + 3..];
-                result = format!("{}{}{}", before, cdata_content, after);
-            } else {
-                break;
-            }
-        }
-        
-        // Decode standard XML entities
-        result = result
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&")
-            .replace("&quot;", "\"")
-            .replace("&apos;", "'")
-            .replace("&#39;", "'")
-            .replace("&#34;", "\"")
-            .replace("&#60;", "<")
-            .replace("&#62;", ">")
-            .replace("&#38;", "&");
-            
-        result
-    }
-
-    /// Detect changes between old and new zone group states
-    fn detect_topology_changes(&self, new_groups: &[Group]) -> Vec<StateChange> {
-        let mut changes = Vec::new();
-
-        match &*self.last_zone_groups.lock().unwrap() {
-            None => {
-                // First time receiving topology - store it without generating events
-                // Groups should already be initialized via state_cache.initialize() during discovery
-                // Skip initial GroupFormed events to prevent conflicts with initialization
-                println!("🔍 Initial topology received with {} groups (storing for future change detection)", new_groups.len());
-                
-                // Store the initial topology for future change detection without generating events
-                // This satisfies requirements 6.1 and 6.2 by ensuring ZoneGroupTopology events
-                // only process actual topology changes, not initial state
-            }
-            Some(old_groups) => {
-                // Compare old and new states to detect specific changes
-                let (speakers_joined, speakers_left, coordinator_changes) = 
-                    self.analyze_topology_changes(old_groups, new_groups);
-
-                // Generate events in the correct order: structural changes first, then membership changes
-                
-                // 1. First, detect newly formed groups (must come before SpeakerJoinedGroup)
-                for group in new_groups {
-                    if !old_groups.iter().any(|old_group| old_group.id == group.id) {
-                        changes.push(StateChange::GroupFormed {
-                            group_id: group.id,
-                            coordinator_id: group.coordinator,
-                            initial_members: group.all_speaker_ids(),
-                        });
-                    }
-                }
-
-                // 2. Then, detect dissolved groups (must come before SpeakerLeftGroup)
-                for old_group in old_groups {
-                    if !new_groups.iter().any(|group| group.id == old_group.id) {
-                        changes.push(StateChange::GroupDissolved {
-                            group_id: old_group.id,
-                            former_coordinator: old_group.coordinator,
-                            former_members: old_group.all_speaker_ids(),
-                        });
-                    }
-                }
-
-                // 3. Then, process speaker membership changes (groups now exist)
-                for (speaker_id, former_group_id) in &speakers_left {
-                    if let Some(group_id) = former_group_id {
-                        changes.push(StateChange::SpeakerLeftGroup {
-                            speaker_id: *speaker_id,
-                            former_group_id: *group_id,
-                        });
-                    }
-                }
-
-                for (speaker_id, group_id) in &speakers_joined {
-                    let coordinator_id = new_groups
-                        .iter()
-                        .find(|g| g.id == *group_id)
-                        .map(|g| g.coordinator)
-                        .unwrap_or(*speaker_id);
-                    
-                    changes.push(StateChange::SpeakerJoinedGroup {
-                        speaker_id: *speaker_id,
-                        group_id: *group_id,
-                        coordinator_id,
-                    });
-                }
-
-                // 4. Finally, process coordinator changes within existing groups
-                for (group_id, old_coordinator, new_coordinator) in &coordinator_changes {
-                    changes.push(StateChange::CoordinatorChanged {
-                        group_id: *group_id,
-                        old_coordinator: *old_coordinator,
-                        new_coordinator: *new_coordinator,
-                    });
-                }
-            }
-        }
-
-        // Update the stored state for next comparison
-        *self.last_zone_groups.lock().unwrap() = Some(new_groups.to_vec());
-
-        println!("✅ Generated {} topology change events", changes.len());
-        changes
-    }
-
-    /// Convert parsed zone groups from the parser to our Group model
-    fn convert_parsed_groups(&self, parsed_groups: &[zone_group_topology::parser::ZoneGroup]) -> Vec<Group> {
-        let mut groups = Vec::new();
-        
-        for parsed_group in parsed_groups {
-            let coordinator_id = SpeakerId::from_udn(&format!("uuid:{}", parsed_group.coordinator));
-            let mut group = Group::new(coordinator_id);
-            
-            // Add all members to the group
-            for member in &parsed_group.zone_group_members {
-                let member_id = SpeakerId::from_udn(&format!("uuid:{}", member.uuid));
-                
-                // Convert satellites
-                let satellites: Vec<SpeakerId> = member.satellites
-                    .iter()
-                    .map(|sat| SpeakerId::from_udn(&format!("uuid:{}", sat.uuid)))
-                    .collect();
-                
-                group.add_member_with_satellites(member_id, satellites);
-            }
-            
-            if group.member_count() > 0 {
-                groups.push(group);
-            }
-        }
-        
-        println!("✅ Converted {} parsed groups to Group model", groups.len());
-        groups
-    }
-
-    /// Analyze detailed changes between old and new topology states
-    fn analyze_topology_changes(
-        &self,
-        old_groups: &[Group],
-        new_groups: &[Group],
-    ) -> (
-        Vec<(SpeakerId, GroupId)>, // speakers_joined
-        Vec<(SpeakerId, Option<GroupId>)>, // speakers_left  
-        Vec<(GroupId, SpeakerId, SpeakerId)>, // coordinator_changes
-    ) {
-        let mut speakers_joined = Vec::new();
-        let mut speakers_left = Vec::new();
-        let mut coordinator_changes = Vec::new();
-
-        // Build maps for easier lookup
-        let old_speaker_to_group: HashMap<SpeakerId, GroupId> = old_groups
-            .iter()
-            .flat_map(|group| {
-                group.all_speaker_ids().into_iter().map(move |speaker_id| (speaker_id, group.id))
-            })
-            .collect();
-
-        let new_speaker_to_group: HashMap<SpeakerId, GroupId> = new_groups
-            .iter()
-            .flat_map(|group| {
-                group.all_speaker_ids().into_iter().map(move |speaker_id| (speaker_id, group.id))
-            })
-            .collect();
-
-        // Find speakers that joined groups
-        for (speaker_id, new_group_id) in &new_speaker_to_group {
-            match old_speaker_to_group.get(speaker_id) {
-                None => {
-                    // Speaker wasn't in any group before, now it is
-                    speakers_joined.push((*speaker_id, *new_group_id));
-                }
-                Some(old_group_id) if old_group_id != new_group_id => {
-                    // Speaker moved from one group to another
-                    speakers_left.push((*speaker_id, Some(*old_group_id)));
-                    speakers_joined.push((*speaker_id, *new_group_id));
-                }
-                _ => {
-                    // Speaker remained in the same group
-                }
-            }
-        }
-
-        // Find speakers that left groups (and didn't join another)
-        // These speakers became solo, they didn't vanish from the network
-        for (speaker_id, old_group_id) in &old_speaker_to_group {
-            if !new_speaker_to_group.contains_key(speaker_id) {
-                // Speaker left group and became solo (still exists in network)
-                speakers_left.push((*speaker_id, Some(*old_group_id)));
-            }
-        }
-
-        // Find coordinator changes within existing groups
-        for new_group in new_groups {
-            if let Some(old_group) = old_groups.iter().find(|g| g.id == new_group.id) {
-                if old_group.coordinator != new_group.coordinator {
-                    coordinator_changes.push((
-                        new_group.id,
-                        old_group.coordinator,
-                        new_group.coordinator,
-                    ));
-                }
-            }
-        }
-
-        (speakers_joined, speakers_left, coordinator_changes)
-    }
+  }
 }
 
 impl ServiceSubscription for ZoneGroupTopologySubscription {
@@ -913,7 +408,7 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
         self.upnp_sid = None;
         self.active = false;
         self.last_renewal = None;
-        *self.last_zone_groups.lock().unwrap() = None;
+        *self.last_zone_topology.lock().unwrap() = None;
 
         println!("✅ ZoneGroupTopology subscription terminated");
         Ok(())
@@ -946,12 +441,11 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
         match zone_group_topology::parser::ZoneGroupTopologyParser::from_xml(event_xml) {
             Ok(parser) => {
                 println!("🔍 Parsing ZoneGroupTopology event...");
+
+                println!("raw event {:?}", event_xml);
                 
-                // Convert parsed data to our Group model
-                let new_groups = self.convert_parsed_groups(&parser.zone_group_state.zone_group_state.zone_groups.zone_groups);
-                
-                // Detect changes and generate appropriate StateChange events
-                changes = self.detect_topology_changes(&new_groups);
+                // Detect changes and generate appropriate StateChange events directly from parser
+                changes = self.detect_topology_changes(&parser.zone_group_state.zone_group_state.zone_groups);
                 
                 println!("✅ Generated {} state changes from ZoneGroupTopology event", changes.len());
             }
@@ -995,7 +489,7 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
             self.subscription_id = None;
             self.upnp_sid = None;
             self.last_renewal = None;
-            *self.last_zone_groups.lock().unwrap() = None;
+            *self.last_zone_topology.lock().unwrap() = None;
         }
         Ok(())
     }
@@ -1040,295 +534,5 @@ mod tests {
         assert_eq!(sub.callback_url(), &callback_url);
         assert!(!sub.is_active());
         assert!(sub.subscription_id().is_none());
-    }
-
-    #[test]
-    fn test_extract_attribute() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let xml = r#"<ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1">"#;
-
-        let coordinator = subscription.extract_attribute(xml, "Coordinator").unwrap();
-        assert_eq!(coordinator, "RINCON_123456789");
-
-        let id = subscription.extract_attribute(xml, "ID").unwrap();
-        assert_eq!(id, "RINCON_123456789:1");
-
-        // Test missing attribute
-        let result = subscription.extract_attribute(xml, "NonExistent");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_zone_group_member() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let member_xml = r#"<ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" />"#;
-
-        let result = subscription.parse_zone_group_member(member_xml).unwrap();
-        assert!(result.is_some());
-
-        let (speaker_id, satellites) = result.unwrap();
-        assert_eq!(speaker_id, SpeakerId::from_udn("uuid:RINCON_123456789"));
-        assert_eq!(satellites.len(), 0); // No satellites parsed yet
-    }
-
-    #[test]
-    fn test_decode_xml_entities() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let encoded = "&lt;ZoneGroupState&gt;&lt;ZoneGroups&gt;&amp;test&amp;&lt;/ZoneGroups&gt;&lt;/ZoneGroupState&gt;";
-        let decoded = subscription.decode_xml_entities(encoded);
-        assert_eq!(
-            decoded,
-            "<ZoneGroupState><ZoneGroups>&test&</ZoneGroups></ZoneGroupState>"
-        );
-    }
-
-    #[test]
-    fn test_extract_property_value() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let xml = r#"
-            <property>
-                <ZoneGroupState>&lt;ZoneGroupState&gt;test&lt;/ZoneGroupState&gt;</ZoneGroupState>
-            </property>
-        "#;
-
-        let result = subscription.extract_property_value(xml, "ZoneGroupState");
-        assert!(result.is_some());
-        assert_eq!(result.unwrap(), "<ZoneGroupState>test</ZoneGroupState>");
-
-        // Test missing property
-        let result = subscription.extract_property_value(xml, "NonExistent");
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_parse_zone_group_state_empty() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let xml = r#"
-            <property>
-                <SomeOtherProperty>value</SomeOtherProperty>
-            </property>
-        "#;
-
-        let groups = subscription.parse_zone_group_state(xml).unwrap();
-        assert_eq!(groups.len(), 0);
-    }
-
-    #[test]
-    fn test_detect_topology_changes_initial() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let coordinator_id = SpeakerId::from_udn("uuid:RINCON_123456789");
-        let groups = vec![Group::new(coordinator_id)];
-
-        let changes = subscription.detect_topology_changes(&groups);
-        
-        // Should NOT generate any events for initial topology to avoid conflicts
-        // with groups already established during discovery (requirements 6.1, 6.2)
-        assert_eq!(changes.len(), 0);
-        
-        // Verify that the topology was stored for future change detection
-        let stored_groups = subscription.last_zone_groups.lock().unwrap();
-        assert!(stored_groups.is_some());
-        assert_eq!(stored_groups.as_ref().unwrap().len(), 1);
-        assert_eq!(stored_groups.as_ref().unwrap()[0].coordinator, coordinator_id);
-    }
-
-    #[test]
-    fn test_detect_topology_changes_subsequent() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let coordinator_id = SpeakerId::from_udn("uuid:RINCON_123456789");
-        let initial_groups = vec![Group::new(coordinator_id)];
-
-        // First call - initial topology (should not generate events)
-        let changes = subscription.detect_topology_changes(&initial_groups);
-        assert_eq!(changes.len(), 0);
-
-        // Second call - topology change (should generate events)
-        let new_coordinator_id = SpeakerId::from_udn("uuid:RINCON_987654321");
-        let mut new_group = Group::new(new_coordinator_id);
-        new_group.add_member(coordinator_id); // Add the original speaker as a member
-        let new_groups = vec![new_group];
-
-        let changes = subscription.detect_topology_changes(&new_groups);
-        
-        // Should generate events for actual topology changes
-        assert!(changes.len() > 0);
-        
-        // Should include GroupFormed for the new group and GroupDissolved for the old one
-        let has_group_formed = changes.iter().any(|change| matches!(change, StateChange::GroupFormed { .. }));
-        let has_group_dissolved = changes.iter().any(|change| matches!(change, StateChange::GroupDissolved { .. }));
-        
-        assert!(has_group_formed, "Should generate GroupFormed event for new group");
-        assert!(has_group_dissolved, "Should generate GroupDissolved event for old group");
-    }
-
-
-
-    #[test]
-    fn test_parse_zone_group_state_with_valid_xml() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let xml = r#"
-            <property>
-                <ZoneGroupState>&lt;ZoneGroupState&gt;&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1"&gt;&lt;ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" /&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;&lt;/ZoneGroupState&gt;</ZoneGroupState>
-            </property>
-        "#;
-
-        let groups = subscription.parse_zone_group_state(xml).unwrap();
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].coordinator, SpeakerId::from_udn("uuid:RINCON_123456789"));
-        assert_eq!(groups[0].member_count(), 1);
-    }
-
-    #[test]
-    fn test_parse_zone_group_state_with_empty_xml() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let result = subscription.parse_zone_group_state("");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Empty XML content"));
-    }
-
-    #[test]
-    fn test_parse_zone_group_state_with_malformed_xml() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let xml = r#"<invalid>not a upnp event</invalid>"#;
-
-        let result = subscription.parse_zone_group_state(xml);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid UPnP event structure"));
-    }
-
-    #[test]
-    fn test_parse_member_satellites() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        // Test with Satellites attribute
-        let member_xml = r#"<ZoneGroupMember UUID="RINCON_123456789" Satellites="RINCON_SAT001,RINCON_SAT002" />"#;
-        let satellites = subscription.parse_member_satellites(member_xml).unwrap();
-        assert_eq!(satellites.len(), 2);
-
-        // Test with no satellites
-        let member_xml_no_sats = r#"<ZoneGroupMember UUID="RINCON_123456789" />"#;
-        let satellites_empty = subscription.parse_member_satellites(member_xml_no_sats).unwrap();
-        assert_eq!(satellites_empty.len(), 0);
-    }
-
-    #[test]
-    fn test_decode_xml_entities_with_cdata() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        let encoded = "<![CDATA[<ZoneGroupState><ZoneGroups></ZoneGroups></ZoneGroupState>]]>";
-        let decoded = subscription.decode_xml_entities(encoded);
-        assert_eq!(decoded, "<ZoneGroupState><ZoneGroups></ZoneGroups></ZoneGroupState>");
-
-        let encoded_with_entities = "&lt;test&gt;&amp;data&amp;";
-        let decoded_entities = subscription.decode_xml_entities(encoded_with_entities);
-        assert_eq!(decoded_entities, "<test>&data&");
-    }
-
-    #[test]
-    fn test_extract_attribute_with_different_quote_styles() {
-        let representative_speaker = create_test_speaker("123456789", "192.168.1.100");
-        let subscription = ZoneGroupTopologySubscription::new(
-            representative_speaker,
-            "http://localhost:8080/callback".to_string(),
-            SubscriptionConfig::default(),
-        )
-        .unwrap();
-
-        // Test double quotes
-        let xml1 = r#"<ZoneGroup Coordinator="RINCON_123456789" />"#;
-        let result1 = subscription.extract_attribute(xml1, "Coordinator").unwrap();
-        assert_eq!(result1, "RINCON_123456789");
-
-        // Test single quotes
-        let xml2 = r#"<ZoneGroup Coordinator='RINCON_123456789' />"#;
-        let result2 = subscription.extract_attribute(xml2, "Coordinator").unwrap();
-        assert_eq!(result2, "RINCON_123456789");
-
-        // Test with spaces
-        let xml3 = r#"<ZoneGroup Coordinator = "RINCON_123456789" />"#;
-        let result3 = subscription.extract_attribute(xml3, "Coordinator").unwrap();
-        assert_eq!(result3, "RINCON_123456789");
     }
 }
