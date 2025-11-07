@@ -4,16 +4,23 @@ use serde::Deserialize;
 #[serde(rename = "propertyset")]
 pub struct ZoneGroupTopologyParser {
     #[serde(rename = "property")]
-    pub zone_group_state: Property,
+    pub properties: Vec<Property>,
+}
+
+impl ZoneGroupTopologyParser {
+    pub fn zone_group_state(&self) -> Option<&Property> {
+        self.properties.iter().find(|p| p.zone_group_state.is_some())
+    }
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Property {
     #[serde(
         rename = "ZoneGroupState",
-        deserialize_with = "crate::xml_decode::xml_decode::deserialize_nested"
+        deserialize_with = "crate::xml_decode::xml_decode::deserialize_nested",
+        default
     )]
-    pub zone_group_state: ZoneGroupState,
+    pub zone_group_state: Option<ZoneGroupState>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -207,7 +214,8 @@ mod tests {
         );
         
         let parsed = result.unwrap();
-        let zone_groups = &parsed.zone_group_state.zone_group_state.zone_groups.zone_groups;
+        let zone_group_property = parsed.zone_group_state().expect("Should have ZoneGroupState property");
+        let zone_groups = &zone_group_property.zone_group_state.as_ref().unwrap().zone_groups.zone_groups;
         
         // Test that we parsed multiple zone groups
         assert!(zone_groups.len() > 0, "Should have parsed at least one zone group");
@@ -219,5 +227,46 @@ mod tests {
         assert_eq!(first_zone.zone_group_members.len(), 1);
         assert_eq!(first_zone.zone_group_members[0].zone_name, "Basement");
         assert_eq!(first_zone.zone_group_members[0].satellites.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_initial_event() {
+      const INITIAL_XML: &str = r#"<e:propertyset xmlns:e=\"urn:schemas-upnp-org:event-1-0\"><e:property><ZoneGroupState>&lt;ZoneGroupState&gt;&lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator=&quot;RINCON_804AF2AA2FA201400&quot; ID=&quot;RINCON_C43875CA135801400:2858411502&quot;&gt;&lt;ZoneGroupMember UUID=&quot;RINCON_804AF2AA2FA201400&quot; Location=&quot;http://192.168.4.48:1400/xml/device_description.xml&quot; ZoneName=&quot;Living Room&quot; Icon=&quot;&quot; Configuration=&quot;1&quot; SoftwareVersion=&quot;85.0-65020&quot; SWGen=&quot;2&quot; MinCompatibleVersion=&quot;84.0-00000&quot; LegacyCompatibleVersion=&quot;58.0-00000&quot; BootSeq=&quot;52&quot; TVConfigurationError=&quot;0&quot; HdmiCecAvailable=&quot;1&quot; WirelessMode=&quot;0&quot; WirelessLeafOnly=&quot;0&quot; ChannelFreq=&quot;2437&quot; BehindWifiExtender=&quot;0&quot; WifiEnabled=&quot;0&quot; EthLink=&quot;1&quot; Orientation=&quot;0&quot; RoomCalibrationState=&quot;4&quot; SecureRegState=&quot;3&quot; VoiceConfigState=&quot;0&quot; MicEnabled=&quot;0&quot; HeadphoneSwapActive=&quot;0&quot; AirPlayEnabled=&quot;1&quot; VirtualLineInSource=&quot;spotify&quot; IdleState=&quot;0&quot; MoreInfo=&quot;TargetRoomName:Living Room&quot; SSLPort=&quot;1443&quot; HHSSLPort=&quot;1843&quot;/&gt;&lt;ZoneGroupMember UUID=&quot;RINCON_000E583FEE3401400&quot; Location=&quot;http://192.168.4.46:1400/xml/device_description.xml&quot; ZoneName=&quot;Kitchen&quot; Icon=&quot;&quot; Configuration=&quot;1&quot; SoftwareVersion=&quot;85.0-64200&quot; SWGen=&quot;2&quot; MinCompatibleVersion=&quot;84.0-00000&quot; LegacyCompatibleVersion=&quot;58.0-00000&quot; BootSeq=&quot;164&quot; TVConfigurationError=&quot;0&quot; HdmiCecAvailable=&quot;0&quot; WirelessMode=&quot;1&quot; WirelessLeafOnly=&quot;0&quot; ChannelFreq=&quot;2412&quot; BehindWifiExtender=&quot;0&quot; WifiEnabled=&quot;1&quot; EthLink=&quot;0&quot; Orientation=&quot;0&quot; RoomCalibrationState=&quot;4&quot; SecureRegState=&quot;3&quot; VoiceConfigState=&quot;0&quot; MicEnabled=&quot;0&quot; HeadphoneSwapActive=&quot;0&quot; AirPlayEnabled=&quot;0&quot; IdleState=&quot;0&quot; MoreInfo=&quot;TargetRoomName:Kitchen&quot; SSLPort=&quot;1443&quot; HHSSLPort=&quot;1843&quot;/&gt;&lt;ZoneGroupMember UUID=&quot;RINCON_C43875CA135801400&quot; Location=&quot;http://192.168.4.39:1400/xml/device_description.xml&quot; ZoneName=&quot;Roam / Office&quot; Icon=&quot;&quot; Configuration=&quot;1&quot; SoftwareVersion=&quot;85.0-64200&quot; SWGen=&quot;2&quot; MinCompatibleVersion=&quot;84.0-00000&quot; LegacyCompatibleVersion=&quot;58.0-00000&quot; BootSeq=&quot;138&quot; TVConfigurationError=&quot;0&quot; HdmiCecAvailable=&quot;0&quot; WirelessMode=&quot;1&quot; WirelessLeafOnly=&quot;0&quot; ChannelFreq=&quot;2412&quot; BehindWifiExtender=&quot;0&quot; WifiEnabled=&quot;1&quot; EthLink=&quot;0&quot; Orientation=&quot;3&quot; RoomCalibrationState=&quot;4&quot; SecureRegState=&quot;3&quot; VoiceConfigState=&quot;2&quot; MicEnabled=&quot;0&quot; HeadphoneSwapActive=&quot;0&quot; AirPlayEnabled=&quot;1&quot; IdleState=&quot;0&quot; MoreInfo=&quot;RawBattPct:90,BattPct:100,BattChg:CHARGING,BattTmp:36&quot; SSLPort=&quot;1443&quot; HHSSLPort=&quot;1843&quot;/&gt;&lt;/ZoneGroup&gt;&lt;ZoneGroup Coordinator=&quot;RINCON_5CAAFDAE58BD01400&quot; ID=&quot;RINCON_5CAAFDAE58BD01400:361632566&quot;&gt;&lt;ZoneGroupMember UUID=&quot;RINCON_5CAAFDAE58BD01400&quot; Location=&quot;http://192.168.4.40:1400/xml/device_description.xml&quot; ZoneName=&quot;Basement&quot; Icon=&quot;&quot; Configuration=&quot;1&quot; SoftwareVersion=&quot;85.0-64200&quot; SWGen=&quot;2&quot; MinCompatibleVersion=&quot;84.0-00000&quot; LegacyCompatibleVersion=&quot;58.0-00000&quot; HTSatChanMapSet=&quot;RINCON_5CAAFDAE58BD01400:LF,RF;RINCON_7828CAFB9D9C01400:LR;RINCON_7828CA128F0001400:RR&quot; ActiveZoneID=&quot;289a89bc-23ff-4122-82c5-837f2f288e3b&quot; BootSeq=&quot;24&quot; TVConfigurationError=&quot;0&quot; HdmiCecAvailable=&quot;0&quot; WirelessMode=&quot;1&quot; WirelessLeafOnly=&quot;0&quot; ChannelFreq=&quot;2412&quot; BehindWifiExtender=&quot;0&quot; WifiEnabled=&quot;1&quot; EthLink=&quot;0&quot; Orientation=&quot;0&quot; RoomCalibrationState=&quot;4&quot; SecureRegState=&quot;3&quot; VoiceConfigState=&quot;0&quot; MicEnabled=&quot;0&quot; HeadphoneSwapActive=&quot;0&quot; AirPlayEnabled=&quot;0&quot; IdleState=&quot;1&quot; MoreInfo=&quot;&quot; SSLPort=&quot;1443&quot; HHSSLPort=&quot;1843&quot;&gt;&lt;Satellite UUID=&quot;RINCON_7828CAFB9D9C01400&quot; Location=&quot;http://192.168.4.30:1400/xml/device_description.xml&quot; ZoneName=&quot;Basement&quot; Icon=&quot;&quot; Configuration=&quot;1&quot; Invisible=&quot;1&quot; SoftwareVersion=&quot;85.0-64200&quot; SWGen=&quot;2&quot; MinCompatibleVersion=&quot;84.0-00000&quot; LegacyCompatibleVersion=&quot;58.0-00000&quot; HTSatChanMapSet=&quot;RINCON_5CAAFDAE58BD01400:LF,RF;RINCON_7828CAFB9D9C01400:LR&quot; ActiveZoneID=&quot;289a89bc-23ff-4122-82c5-837f2f288e3b&quot; BootSeq=&quot;27&quot; TVConfigurationError=&quot;0&quot; HdmiCecAvailable=&quot;0&quot; WirelessMode=&quot;2&quot; WirelessLeafOnly=&quot;0&quot; ChannelFreq=&quot;5825&quot; BehindWifiExtender=&quot;0&quot; WifiEnabled=&quot;1&quot; EthLink=&quot;0&quot; Orientation=&quot;0&quot; RoomCalibrationState=&quot;5&quot; SecureRegState=&quot;3&quot; VoiceConfigState=&quot;0&quot; MicEnabled=&quot;0&quot; HeadphoneSwapActive=&quot;0&quot; AirPlayEnabled=&quot;0&quot; IdleState=&quot;1&quot; MoreInfo=&quot;&quot; SSLPort=&quot;1443&quot; HHSSLPort=&quot;1843&quot;/&gt;&lt;Satellite UUID=&quot;RINCON_7828CA128F0001400&quot; Location=&quot;http://192.168.4.29:1400/xml/device_description.xml&quot; ZoneName=&quot;Basement&quot; Icon=&quot;&quot; Configuration=&quot;1&quot; Invisible=&quot;1&quot; SoftwareVersion=&quot;85.0-64200&quot; SWGen=&quot;2&quot; MinCompatibleVersion=&quot;84.0-00000&quot; LegacyCompatibleVersion=&quot;58.0-00000&quot; HTSatChanMapSet=&quot;RINCON_5CAAFDAE58BD01400:LF,RF;RINCON_7828CA128F0001400:RR&quot; ActiveZoneID=&quot;289a89bc-23ff-4122-82c5-837f2f288e3b&quot; BootSeq=&quot;28&quot; TVConfigurationError=&quot;0&quot; HdmiCecAvailable=&quot;0&quot; WirelessMode=&quot;2&quot; WirelessLeafOnly=&quot;0&quot; ChannelFreq=&quot;5825&quot; BehindWifiExtender=&quot;0&quot; WifiEnabled=&quot;1&quot; EthLink=&quot;0&quot; Orientation=&quot;0&quot; RoomCalibrationState=&quot;5&quot; SecureRegState=&quot;3&quot; VoiceConfigState=&quot;0&quot; MicEnabled=&quot;0&quot; HeadphoneSwapActive=&quot;0&quot; AirPlayEnabled=&quot;0&quot; IdleState=&quot;1&quot; MoreInfo=&quot;&quot; SSLPort=&quot;1443&quot; HHSSLPort=&quot;1843&quot;/&gt;&lt;/ZoneGroupMember&gt;&lt;/ZoneGroup&gt;&lt;ZoneGroup Coordinator=&quot;RINCON_5CAAFDEFEE7E01400&quot; ID=&quot;RINCON_5CAAFDEFEE7E01400:927350103&quot;&gt;&lt;ZoneGroupMember UUID=&quot;RINCON_5CAAFDEFEE7E01400&quot; Location=&quot;http://192.168.4.66:1400/xml/device_description.xml&quot; ZoneName=&quot;Bedroom&quot; Icon=&quot;&quot; Configuration=&quot;1&quot; SoftwareVersion=&quot;85.0-66270&quot; SWGen=&quot;2&quot; MinCompatibleVersion=&quot;84.0-00000&quot; LegacyCompatibleVersion=&quot;58.0-00000&quot; BootSeq=&quot;47&quot; TVConfigurationError=&quot;0&quot; HdmiCecAvailable=&quot;0&quot; WirelessMode=&quot;1&quot; WirelessLeafOnly=&quot;0&quot; ChannelFreq=&quot;2412&quot; BehindWifiExtender=&quot;0&quot; WifiEnabled=&quot;1&quot; EthLink=&quot;0&quot; Orientation=&quot;0&quot; RoomCalibrationState=&quot;4&quot; SecureRegState=&quot;3&quot; VoiceConfigState=&quot;0&quot; MicEnabled=&quot;0&quot; HeadphoneSwapActive=&quot;0&quot; AirPlayEnabled=&quot;0&quot; IdleState=&quot;1&quot; MoreInfo=&quot;TargetRoomName:Bedroom&quot; SSLPort=&quot;1443&quot; HHSSLPort=&quot;1843&quot;/&gt;&lt;/ZoneGroup&gt;&lt;ZoneGroup Coordinator=&quot;RINCON_B8E937A84F0601400&quot; ID=&quot;RINCON_5CAAFDEFEE7E01400:927350102&quot;&gt;&lt;ZoneGroupMember UUID=&quot;RINCON_B8E937A84F0601400&quot; Location=&quot;http://192.168.4.45:1400/xml/device_description.xml&quot; ZoneName=&quot;Bathroom&quot; Icon=&quot;&quot; Configuration=&quot;1&quot; SoftwareVersion=&quot;85.0-64200&quot; SWGen=&quot;2&quot; MinCompatibleVersion=&quot;84.0-00000&quot; LegacyCompatibleVersion=&quot;58.0-00000&quot; BootSeq=&quot;74&quot; TVConfigurationError=&quot;0&quot; HdmiCecAvailable=&quot;0&quot; WirelessMode=&quot;1&quot; WirelessLeafOnly=&quot;0&quot; ChannelFreq=&quot;2412&quot; BehindWifiExtender=&quot;0&quot; WifiEnabled=&quot;1&quot; EthLink=&quot;0&quot; Orientation=&quot;0&quot; RoomCalibrationState=&quot;4&quot; SecureRegState=&quot;3&quot; VoiceConfigState=&quot;0&quot; MicEnabled=&quot;0&quot; HeadphoneSwapActive=&quot;0&quot; AirPlayEnabled=&quot;0&quot; IdleState=&quot;1&quot; MoreInfo=&quot;&quot; SSLPort=&quot;1443&quot; HHSSLPort=&quot;1843&quot;/&gt;&lt;/ZoneGroup&gt;&lt;/ZoneGroups&gt;&lt;VanishedDevices&gt;&lt;/VanishedDevices&gt;&lt;/ZoneGroupState&gt;</ZoneGroupState></e:property><e:property><ThirdPartyMediaServersX>2:OPP+PD1C03a2Akkj/oIxdkKdXdPSCStV2FMspJkK6nHtnloB124s7zxK/S+xfX21jWWgIrcv1u/e/6jHUO5+5MjbYSHhL/Audny29BXiQN0LpsnMA2NOBM6ecj2FjezLbSQt3TniimEOhCwqkqtQXbt0Nlf/xSYRCab+JZUwzTvfs0mCB2szZtqTy2GjMrFwV+iAQwoOZw89fPoNUxPR1dNOHyHr9fDXQYXFfn7+DOQsvbVmGpu8qDSmeEf4no0+xlpIdDUACfSg+eC+Ce63e8YbFMymAumgR30g6P3uJPUnimjLav9MGRnNDAleGnxPFY79ZYhceyO4KRZYdyLss3uZBhGheYYwKm88meG2wFRAZBg1JCjcBJ2EOxg5bmZezU+HrJFz1IAZApTPVGD/v5nv5uEZo511Wo/BKUerVPuQOv8MF9g8uaCrIXzB/1tl9q02S14CwSJYWLuV63RcwYSoyAcWriqCBb02uwbYnl/VKyg9TjAFuQ0QuNzPOpf9RSOKBlMlIgDYrgxp4VolAUv/ZBY7IfFLgFgO8C/RG/PDvihLKWKi+OBCUmEi+9EO/hBUAB2yt5Jjg0Z78av2tf4cr6OKKAi2FIfEj040K2mGSpv3V/Z7IRmPNtOtEEeWMf12dw5v32+eLGCHhIW8idue2yC7P4mU9f5MPsVz0QUlgp9O7b2jMzugViGnm+uZ0hEGtZKVKIugDN6fkZktGUWG8kxqIMZkuBluTzE/GnuS9pWNg4lsQFOup4q0tpyj6S4h5jboVDHPo3fwQXQKRM230BSAe5ivv5NlMOmJfJaLGJsVIQQRlZvojFHajudxCSUvSN/ap4G9jWEloRTYGE2Y061cPxvS6maW46xPoK2L8LKnxWEyJCSUYf4TLCS+MWz3qchLvrfzu1TAPtKZxREboUPh7CSb74YuDI0Rj4AUb5BEvgWIIoFaKxBglqqacO+kCN8irtlCisAFgrkOGNITcaEFPXAP/Qoz5MVCi/EOAhJRdfmeUUriiIJLbEbkVXlv63hvf6+i2QIGFJawm+ziKGRJnrh4p1QRZrYbnWASPOFe+KT+Z2wNoYtyZxIdm1IhcBPO2wMQ6zCF0mUVkKmHiNrqcUeGIPHf0Vuf5NORN1LG7LK9MuvY085iD/oS/SUi7yWbbp1X6C30+e8YPSP6mmoGdbx52F2YDOSEqeIc4WVc5nLL48PX4Wz4eirjcB5reyX7+/nffuOv8ABxGeb0e2zjfs5NgZpen1BweOfKVBFKHAhiqe272COC/Vp1O5v0pqnQ9ZLDWstWh5qiX2gIdE9lNywxngdmyHcBaGo8u2qhDyRMu7Rx1hi9JCpRDMuZwT6jVaocJpQ7VJ9b1lRAvsRj58+Y+yx33KDvvPQhhC7zI8rVO61OrLy/p+CRJT35r8R7pdA6S0u2M/ZC85Pzgt9RVCLXrWaaj/Ad7+XdWHmuPGDMytCyip20kCxAyxuoKJovuRu2bDfaMpYcn3t+1I871eI0I/uOJerW4vEXdIHxiw/N3I/3aSV1x3TkM5KNs0e/FW9Ija6FH9Iglr/WZwMv/lPQUaoGAedA4Nb9e4+rPQ48+omjyfV5uSWdH1fpq2IyHhi8NBPWN/7ACh48TMUGUgSBxhBEuTGFMLdgTiyTVSPNuDVSwX9ArGMXun3z30SesEdoomczQXpW4K2YXEDQ06XB0azvXa0y88N+V57Zvmg+T73v6MA7AWG1G3BtxebBH3VVfeqWlZTuoqwVmzTFp+0iV1Xfb86X/0aSXUKMFs9ROmsrq4xnm9NOj//FY/gaZ9o3f9xKxRyJl1UESPx/y+WNQzjWd9aFYX4=</ThirdPartyMediaServersX></e:property><e:property><AvailableSoftwareUpdate>&lt;UpdateItem xmlns=&quot;urn:schemas-rinconnetworks-com:update-1-0&quot; Type=&quot;Software&quot; Version=&quot;92.0-70280&quot; UpdateURL=&quot;http://update-firmware.sonos.com/firmware/Prod/92.0-70280-v17.6-vfSvLjPbJL-RC-3/^92.0-70280&quot; DownloadSize=&quot;0&quot; ManifestURL=&quot;http://update.sonos.com/firmware/Prod/2025-Sonos-22-ypNUZy581r-GA-1/update.upm&quot; Swgen=&quot;2&quot; LatestSwgen=&quot;2&quot; ManifestRevision=&quot;8b174086-7920-4aa6-b1e3-74cecc800cf0&quot;/&gt;</AvailableSoftwareUpdate></e:property><e:property><AlarmRunSequence>RINCON_804AF2AA2FA201400:52:14</AlarmRunSequence></e:property><e:property><ZoneGroupName>Living Room + 2</ZoneGroupName></e:property><e:property><ZoneGroupID>RINCON_C43875CA135801400:2858411502</ZoneGroupID></e:property><e:property><ZonePlayerUUIDsInGroup>RINCON_804AF2AA2FA201400,RINCON_000E583FEE3401400,RINCON_C43875CA135801400</ZonePlayerUUIDsInGroup></e:property><e:property><MuseHouseholdId>Sonos_AXJwk0FKCCnQL8UN5AzA4gFULa.oaXxqEkNqxQUnlddl8aQ</MuseHouseholdId></e:property><e:property><AreasUpdateID>YN2tJwGMhxHDHmEUeUVwQ2OWcnIfxppfRtP83cwn9Xw=</AreasUpdateID></e:property><e:property><SourceAreasUpdateID></SourceAreasUpdateID></e:property><e:property><NetsettingsUpdateID>114</NetsettingsUpdateID></e:property></e:propertyset>"#;
+    
+        let result = ZoneGroupTopologyParser::from_xml(INITIAL_XML);
+        
+        assert!(
+            result.is_ok(),
+            "Failed to parse initial XML: {:?}",
+            result.err()
+        );
+        
+        let parsed = result.unwrap();
+        let zone_group_property = parsed.zone_group_state().expect("Should have ZoneGroupState property");
+        let zone_groups = &zone_group_property.zone_group_state.as_ref().unwrap().zone_groups.zone_groups;
+        
+        // Validate we parsed multiple zone groups
+        assert_eq!(zone_groups.len(), 4, "Should have parsed 4 zone groups");
+        
+        // Test the first zone group (Living Room + Kitchen + Roam/Office)
+        let first_zone = &zone_groups[0];
+        assert_eq!(first_zone.coordinator, "RINCON_804AF2AA2FA201400");
+        assert_eq!(first_zone.id, "RINCON_C43875CA135801400:2858411502");
+        assert_eq!(first_zone.zone_group_members.len(), 3, "First zone should have 3 members");
+        
+        // Validate zone member names
+        assert_eq!(first_zone.zone_group_members[0].zone_name, "Living Room");
+        assert_eq!(first_zone.zone_group_members[1].zone_name, "Kitchen");
+        assert_eq!(first_zone.zone_group_members[2].zone_name, "Roam / Office");
+        
+        // Test the second zone group (Basement with satellites)
+        let second_zone = &zone_groups[1];
+        assert_eq!(second_zone.coordinator, "RINCON_5CAAFDAE58BD01400");
+        assert_eq!(second_zone.zone_group_members[0].zone_name, "Basement");
+        assert_eq!(second_zone.zone_group_members[0].satellites.len(), 2, "Basement should have 2 satellites");
+        
+        // Test remaining individual zones
+        assert_eq!(zone_groups[2].zone_group_members[0].zone_name, "Bedroom");
+        assert_eq!(zone_groups[3].zone_group_members[0].zone_name, "Bathroom");
     }
 }

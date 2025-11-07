@@ -431,21 +431,17 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
 
     fn parse_event(&self, event_xml: &str) -> SubscriptionResult<Vec<StateChange>> {
         let mut changes = Vec::new();
-        
-        // Validate input
-        if event_xml.is_empty() {
-            println!("⚠️  Received empty event XML, returning no changes");
-            return Ok(Vec::new());
-        }
 
         match zone_group_topology::parser::ZoneGroupTopologyParser::from_xml(event_xml) {
             Ok(parser) => {
                 println!("🔍 Parsing ZoneGroupTopology event...");
-
-                println!("raw event {:?}", event_xml);
                 
                 // Detect changes and generate appropriate StateChange events directly from parser
-                changes = self.detect_topology_changes(&parser.zone_group_state.zone_group_state.zone_groups);
+                if let Some(zone_group_property) = parser.zone_group_state() {
+                    if let Some(zone_group_state) = &zone_group_property.zone_group_state {
+                        changes = self.detect_topology_changes(&zone_group_state.zone_groups);
+                    }
+                }
                 
                 println!("✅ Generated {} state changes from ZoneGroupTopology event", changes.len());
             }
