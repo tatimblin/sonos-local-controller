@@ -4,8 +4,7 @@ use std::time::Duration;
 
 fn create_test_speaker(id: &str, name: &str) -> Speaker {
     Speaker {
-        id: SpeakerId::from_udn(id),
-        udn: id.to_string(),
+        id: SpeakerId::new(id),
         name: name.to_string(),
         room_name: name.to_string(),
         ip_address: "192.168.1.100".to_string(),

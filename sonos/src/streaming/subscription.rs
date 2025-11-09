@@ -1,5 +1,5 @@
 use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
-use crate::models::{SpeakerId, StateChange};
+use crate::model::{SpeakerId, StateChange};
 use std::time::SystemTime;
 
 /// Error types for subscription operations
@@ -181,7 +181,7 @@ pub trait ServiceSubscriptionFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::SpeakerId;
+    use crate::model::SpeakerId;
 
     // Mock implementation for testing
     struct MockSubscription {

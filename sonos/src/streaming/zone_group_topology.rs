@@ -1,7 +1,7 @@
 use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
 use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
 use crate::group::Group;
-use crate::models::{Speaker, SpeakerId, StateChange};
+use crate::model::{Speaker, SpeakerId, StateChange};
 use crate::service::zone_group_topology::parser::ZoneGroupTopologyParser;
 
 use std::time::SystemTime;
@@ -340,7 +340,7 @@ impl ServiceSubscription for ZoneGroupTopologySubscription {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Speaker;
+    use crate::model::Speaker;
 
     fn create_test_speaker(id_suffix: &str, ip: &str) -> Speaker {
         Speaker {

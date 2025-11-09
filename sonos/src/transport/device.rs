@@ -1,5 +1,5 @@
 use crate::error::{Result, SonosError};
-use crate::models::{Speaker, SpeakerId};
+use crate::model::{Speaker, SpeakerId};
 use serde::Deserialize;
 
 /// UPnP device description root element

@@ -1,7 +1,7 @@
 use super::device::{extract_ip_from_url, Device};
 use super::ssdp::SsdpClient;
 use crate::error::{Result, SonosError};
-use crate::models::Speaker;
+use crate::model::Speaker;
 use std::collections::HashSet;
 use std::time::Duration;
 

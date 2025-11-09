@@ -1,7 +1,7 @@
 use super::interface::{ConfigOverrides, LifecycleHandlers, StreamError, StreamStats};
 use super::manager::SubscriptionManager;
 use super::types::{ServiceType, StreamConfig};
-use crate::models::{Speaker, SpeakerId, StateChange};
+use crate::model::{Speaker, SpeakerId, StateChange};
 use crate::state::StateCache;
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
@@ -692,7 +692,7 @@ impl ActiveEventStream {
             } => {
                 // Transport status can indicate connection issues (non-blocking processing)
                 match transport_status {
-                    crate::models::TransportStatus::ErrorOccurred => {
+                    crate::model::TransportStatus::ErrorOccurred => {
                         log::debug!("Transport error occurred for speaker {:?}", speaker_id);
 
                         if let Some(ref handler) = handlers.on_error {
@@ -710,7 +710,7 @@ impl ActiveEventStream {
                             }
                         }
                     }
-                    crate::models::TransportStatus::Ok => {
+                    crate::model::TransportStatus::Ok => {
                         // Transport OK indicates successful communication (non-blocking log only)
                         log::debug!(
                             "Transport OK for speaker {:?}, indicating connectivity",
@@ -951,7 +951,7 @@ impl Drop for ActiveEventStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Speaker, SpeakerId};
+    use crate::model::{Speaker, SpeakerId};
 
     fn create_test_speaker(id: &str, name: &str) -> Speaker {
         Speaker {

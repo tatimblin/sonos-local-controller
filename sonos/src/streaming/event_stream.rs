@@ -1,6 +1,6 @@
 use super::manager::SubscriptionManager;
 use super::subscription::SubscriptionResult;
-use crate::models::{Speaker, SpeakerId, StateChange};
+use crate::model::{Speaker, SpeakerId, StateChange};
 use crate::state::StateCache;
 use std::sync::Arc;
 
@@ -159,7 +159,7 @@ impl EventStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{PlaybackState, Speaker, SpeakerId};
+    use crate::model::{PlaybackState, Speaker, SpeakerId};
 
     fn create_test_speaker(id: &str) -> Speaker {
         Speaker {

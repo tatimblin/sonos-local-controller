@@ -1,4 +1,4 @@
-use sonos::models::{Speaker, SpeakerId, StateChange};
+use sonos::model::{Speaker, SpeakerId, StateChange};
 use sonos::streaming::{
     EventStreamBuilder, ServiceType, StreamError, LifecycleHandlers
 };

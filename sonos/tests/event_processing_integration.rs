@@ -1,4 +1,4 @@
-use sonos::models::{PlaybackState, Speaker, SpeakerId, StateChange, TrackInfo, TransportStatus};
+use sonos::model::{PlaybackState, Speaker, SpeakerId, StateChange, TrackInfo, TransportStatus};
 use sonos::state::StateCache;
 use sonos::streaming::{EventStreamBuilder, LifecycleHandlers, ServiceType, StreamError};
 use std::sync::{Arc, Mutex};

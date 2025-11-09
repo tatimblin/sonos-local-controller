@@ -9,7 +9,7 @@ use super::callback_server::CallbackServer;
 use super::rendering_control::RenderingControlSubscription;
 use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
 use super::types::{RawEvent, ServiceType, StreamConfig, SubscriptionConfig, SubscriptionId, SubscriptionScope};
-use crate::models::{Speaker, SpeakerId, StateChange};
+use crate::model::{Speaker, SpeakerId, StateChange};
 
 /// Manages UPnP subscriptions across multiple speakers
 ///
@@ -532,7 +532,7 @@ impl SubscriptionManager {
                 
                 // Send isolated error event for PerSpeaker service
                 let error_change = StateChange::SubscriptionError {
-                    speaker_id: crate::models::SpeakerId::new(&format!("uuid:RINCON_{}::1", speaker_name)),
+                    speaker_id: crate::model::SpeakerId::new(&format!("uuid:RINCON_{}::1", speaker_name)),
                     service: service_type,
                     error: format!("PerSpeaker service failure: {}", error),
                 };
@@ -553,7 +553,7 @@ impl SubscriptionManager {
 
                 // Send isolated error event for NetworkWide service
                 let error_change = StateChange::SubscriptionError {
-                    speaker_id: crate::models::SpeakerId::new(&format!("uuid:RINCON_{}::1", speaker_name)),
+                    speaker_id: crate::model::SpeakerId::new(&format!("uuid:RINCON_{}::1", speaker_name)),
                     service: service_type,
                     error: format!("NetworkWide service failure: {}", error),
                 };
@@ -1487,7 +1487,7 @@ impl Drop for SubscriptionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::SpeakerId;
+    use crate::model::SpeakerId;
 
     fn create_test_speaker(id: &str) -> Speaker {
         Speaker {
@@ -1720,7 +1720,7 @@ mod tests {
 #[cfg(test)]
 mod network_tests {
     use super::*;
-    use crate::models::{Speaker, SpeakerId};
+    use crate::model::{Speaker, SpeakerId};
     use std::sync::mpsc;
 
     fn create_test_speaker(id: &str, ip: &str, name: &str) -> Speaker {

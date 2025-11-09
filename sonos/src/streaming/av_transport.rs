@@ -1,6 +1,6 @@
 use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
 use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
-use crate::models::{Speaker, SpeakerId, StateChange};
+use crate::model::{Speaker, SpeakerId, StateChange};
 use crate::service::av_transport;
 use crate::transport::soap::SoapClient;
 use std::time::SystemTime;
@@ -305,7 +305,7 @@ impl ServiceSubscription for AVTransportSubscription {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{PlaybackState, models::Speaker};
+    use crate::{PlaybackState, model::Speaker};
 
     fn create_test_speaker() -> Speaker {
         Speaker {
