@@ -400,12 +400,6 @@ impl EventStreamBuilder {
             successful_speakers, total_speakers
         );
 
-        // Show callback server info for debugging
-        if let Some(port) = subscription_manager.callback_server_port() {
-            println!("📡 Callback server running on port: {}", port);
-            println!("   Sonos devices will send events to this server");
-        }
-
         // Return ActiveEventStream instance with running event processing
         let active_stream = ActiveEventStream::new(
             subscription_manager,

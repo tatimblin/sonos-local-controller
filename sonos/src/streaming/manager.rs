@@ -597,60 +597,6 @@ impl SubscriptionManager {
         }
     }
 
-    /// Validate subscription registry consistency
-    /// 
-    /// This method checks for registry corruption and attempts to recover,
-    /// ensuring error isolation between service types.
-    fn validate_subscription_registry(&self) -> Result<(), SubscriptionError> {
-        let network_subscriptions = self.network_subscriptions.read().unwrap();
-        let subscriptions = self.subscriptions.read().unwrap();
-
-        let mut corruption_detected = false;
-        let mut corruption_messages = Vec::new();
-
-        // Check that all NetworkWide subscriptions in registry exist in main subscriptions
-        for (service_type, &subscription_id) in network_subscriptions.iter() {
-            if !subscriptions.contains_key(&subscription_id) {
-                corruption_detected = true;
-                corruption_messages.push(format!(
-                    "NetworkWide service {:?} references non-existent subscription {}",
-                    service_type, subscription_id
-                ));
-            } else if let Some(subscription) = subscriptions.get(&subscription_id) {
-                // Verify service type matches
-                if subscription.service_type() != *service_type {
-                    corruption_detected = true;
-                    corruption_messages.push(format!(
-                        "NetworkWide registry mismatch: expected {:?}, found {:?} for subscription {}",
-                        service_type, subscription.service_type(), subscription_id
-                    ));
-                }
-                
-                // Verify subscription scope
-                if subscription.subscription_scope() != SubscriptionScope::NetworkWide {
-                    corruption_detected = true;
-                    corruption_messages.push(format!(
-                        "Non-NetworkWide subscription {} registered as NetworkWide for service {:?}",
-                        subscription_id, service_type
-                    ));
-                }
-            }
-        }
-
-        if corruption_detected {
-            let message = corruption_messages.join("; ");
-            log::error!("[Registry] Subscription registry corruption detected: {}", message);
-            return Err(SubscriptionError::RegistryCorruption { message });
-        }
-
-        log::debug!("[Registry] Subscription registry validation passed");
-        Ok(())
-    }
-
-
-
-
-
     /// Create a subscription for a specific service on a speaker with retry logic
     fn create_subscription_for_service(
         &self,
@@ -848,14 +794,6 @@ impl SubscriptionManager {
         Duration::from_millis(capped_backoff_ms)
     }
 
-
-
-
-
-
-
-
-
     /// Remove all subscriptions for a speaker
     fn remove_subscriptions_for_speaker(&self, speaker_id: &SpeakerId) -> SubscriptionResult<()> {
         let mut subscriptions_to_remove = Vec::new();
@@ -902,14 +840,6 @@ impl SubscriptionManager {
         }
 
         Ok(())
-    }
-
-    /// Validate subscription registry consistency (public interface)
-    /// 
-    /// This method can be called externally to check for registry corruption
-    /// and ensure proper error isolation between service types.
-    pub fn validate_registry(&self) -> SubscriptionResult<()> {
-        self.validate_subscription_registry()
     }
 
     /// Add a speaker to the subscription manager
@@ -1051,16 +981,6 @@ impl SubscriptionManager {
         Ok(())
     }
 
-    // Removed complex failover and recovery logic to prevent subscription recreation issues
-
-    /// Refresh all subscriptions
-    ///
-    /// This method checks all active subscriptions and renews any that are approaching expiry.
-    pub fn refresh_subscriptions(&self) -> SubscriptionResult<()> {
-        Self::check_subscription_renewals(&self.subscriptions, &self.config);
-        Ok(())
-    }
-
     /// Shutdown the subscription manager
     ///
     /// This method cleanly shuts down all subscriptions and releases resources.
@@ -1123,249 +1043,6 @@ impl SubscriptionManager {
     /// Get the number of managed speakers
     pub fn speaker_count(&self) -> usize {
         self.speakers.read().unwrap().len()
-    }
-
-    /// Get information about all active subscriptions
-    pub fn get_subscription_info(&self) -> Vec<SubscriptionInfo> {
-        let subscriptions = self.subscriptions.read().unwrap();
-        let speakers = self.speakers.read().unwrap();
-
-        subscriptions
-            .iter()
-            .map(|(id, subscription)| {
-                let speaker_name = speakers
-                    .get(&subscription.speaker_id())
-                    .map(|s| s.name.clone())
-                    .unwrap_or_else(|| "Unknown".to_string());
-
-                SubscriptionInfo {
-                    id: *id,
-                    speaker_id: subscription.speaker_id().clone(),
-                    speaker_name,
-                    service_type: subscription.service_type(),
-                    is_active: subscription.is_active(),
-                    last_renewal: subscription.last_renewal(),
-                    needs_renewal: subscription.needs_renewal(),
-                }
-            })
-            .collect()
-    }
-
-    /// Force renewal of all active subscriptions
-    pub fn force_renewal_all(&self) -> SubscriptionResult<()> {
-        let mut subscriptions_guard = self.subscriptions.write().unwrap();
-        let mut renewal_results = Vec::new();
-
-        for (id, subscription) in subscriptions_guard.iter_mut() {
-            if subscription.is_active() {
-                match subscription.renew() {
-                    Ok(()) => {
-                        log::debug!("Successfully force-renewed subscription {}", id);
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to force-renew subscription {}: {}", id, e);
-                        renewal_results.push((*id, e));
-                        // Mark subscription as inactive
-                        let _ = subscription.on_subscription_state_changed(false);
-                    }
-                }
-            }
-        }
-
-        if !renewal_results.is_empty() {
-            let error_msg = format!("Failed to renew {} subscriptions", renewal_results.len());
-            return Err(SubscriptionError::SubscriptionFailed(error_msg));
-        }
-
-        Ok(())
-    }
-
-
-
-    /// Recreate subscriptions for a specific speaker
-    ///
-    /// This method removes all existing subscriptions for the speaker and creates new ones.
-    /// Useful for recovering from persistent subscription failures.
-    pub fn recreate_subscriptions_for_speaker(
-        &self,
-        speaker_id: SpeakerId,
-    ) -> SubscriptionResult<()> {
-        // Get the speaker info
-        let speaker = {
-            let speakers = self.speakers.read().unwrap();
-            speakers.get(&speaker_id).cloned()
-        };
-
-        let speaker = match speaker {
-            Some(s) => s,
-            None => {
-                return Err(SubscriptionError::SubscriptionNotFound {
-                    subscription_id: SubscriptionId::new(), // Placeholder
-                });
-            }
-        };
-
-        // Remove existing subscriptions
-        self.remove_subscriptions_for_speaker(&speaker_id)?;
-
-        // Create new subscriptions
-        let subscription_ids = self.create_subscriptions_for_speaker(&speaker)?;
-
-        log::info!(
-            "Recreated {} subscriptions for speaker {}",
-            subscription_ids.len(),
-            speaker.name
-        );
-
-        Ok(())
-    }
-
-    /// Get subscription statistics
-    pub fn get_statistics(&self) -> SubscriptionStatistics {
-        let subscriptions = self.subscriptions.read().unwrap();
-        let speakers = self.speakers.read().unwrap();
-
-        let total_subscriptions = subscriptions.len();
-        let active_subscriptions = subscriptions.values().filter(|s| s.is_active()).count();
-        let subscriptions_needing_renewal =
-            subscriptions.values().filter(|s| s.needs_renewal()).count();
-
-        let mut service_counts = HashMap::new();
-        for subscription in subscriptions.values() {
-            *service_counts
-                .entry(subscription.service_type())
-                .or_insert(0) += 1;
-        }
-
-        SubscriptionStatistics {
-            total_speakers: speakers.len(),
-            total_subscriptions,
-            active_subscriptions,
-            subscriptions_needing_renewal,
-            service_counts,
-        }
-    }
-
-    /// Clean up inactive subscriptions
-    ///
-    /// This method removes subscriptions that are no longer active and cannot be renewed.
-    pub fn cleanup_inactive_subscriptions(&self) -> SubscriptionResult<usize> {
-        let mut subscriptions_to_remove = Vec::new();
-
-        // Find inactive subscriptions
-        {
-            let subscriptions = self.subscriptions.read().unwrap();
-            for (id, subscription) in subscriptions.iter() {
-                if !subscription.is_active() {
-                    subscriptions_to_remove.push(*id);
-                }
-            }
-        }
-
-        // Remove inactive subscriptions
-        for subscription_id in &subscriptions_to_remove {
-            self.remove_subscription(*subscription_id)?;
-        }
-
-        log::info!(
-            "Cleaned up {} inactive subscriptions",
-            subscriptions_to_remove.len()
-        );
-        Ok(subscriptions_to_remove.len())
-    }
-
-    /// Check if a speaker has active subscriptions
-    pub fn has_active_subscriptions(&self, speaker_id: &SpeakerId) -> bool {
-        let subscriptions = self.subscriptions.read().unwrap();
-        subscriptions
-            .values()
-            .any(|s| s.speaker_id() == speaker_id && s.is_active())
-    }
-
-    /// Get the callback server port
-    pub fn callback_server_port(&self) -> Option<u16> {
-        let callback_server = self.callback_server.read().unwrap();
-        callback_server.as_ref().map(|s| s.port())
-    }
-
-    /// Attempt to recover failed subscriptions (simplified to prevent subscription recreation)
-    ///
-    /// This method is now simplified to prevent automatic subscription recreation
-    /// that can cause callback registration conflicts.
-    pub fn recover_failed_subscriptions(&self) -> SubscriptionResult<RecoveryReport> {
-        let recovery_report = RecoveryReport {
-            total_attempts: 0,
-            successful_recoveries: 0,
-            failed_recoveries: Vec::new(),
-        };
-
-        log::debug!("Subscription recovery disabled to prevent callback registration conflicts");
-        log::debug!("Subscriptions will be created naturally when speakers are added");
-
-        Ok(recovery_report)
-    }
-
-    /// Check network connectivity to a speaker
-    pub fn check_speaker_connectivity(&self, speaker_id: &SpeakerId) -> bool {
-        let speaker = {
-            let speakers = self.speakers.read().unwrap();
-            speakers.get(&speaker_id).cloned()
-        };
-
-        if let Some(speaker) = speaker {
-            Self::is_speaker_reachable(&speaker)
-        } else {
-            false
-        }
-    }
-
-    /// Check if a speaker is reachable via network
-    fn is_speaker_reachable(speaker: &Speaker) -> bool {
-        use std::net::{SocketAddr, TcpStream};
-        use std::time::Duration;
-
-        let addr = format!("{}:{}", speaker.ip_address, speaker.port);
-        if let Ok(socket_addr) = addr.parse::<SocketAddr>() {
-            TcpStream::connect_timeout(&socket_addr, Duration::from_secs(3)).is_ok()
-        } else {
-            false
-        }
-    }
-
-    /// Perform health check on all subscriptions (simplified - no automatic recovery)
-    pub fn health_check_and_recover(&self) -> SubscriptionResult<HealthCheckReport> {
-        let mut report = HealthCheckReport {
-            total_speakers: 0,
-            reachable_speakers: 0,
-            total_subscriptions: 0,
-            active_subscriptions: 0,
-            recovery_attempted: false,
-            recovery_report: None,
-        };
-
-        // Check speaker connectivity
-        let speakers: Vec<Speaker> = {
-            let speakers_guard = self.speakers.read().unwrap();
-            speakers_guard.values().cloned().collect()
-        };
-
-        report.total_speakers = speakers.len();
-
-        for speaker in &speakers {
-            if Self::is_speaker_reachable(speaker) {
-                report.reachable_speakers += 1;
-            }
-        }
-
-        // Check subscription health
-        let stats = self.get_statistics();
-        report.total_subscriptions = stats.total_subscriptions;
-        report.active_subscriptions = stats.active_subscriptions;
-
-        // No automatic recovery to prevent subscription recreation issues
-        log::debug!("Health check complete. Automatic recovery disabled to prevent callback conflicts.");
-
-        Ok(report)
     }
 
     /// Enhanced renewal with retry logic
@@ -1542,26 +1219,6 @@ mod tests {
     }
 
     #[test]
-    fn test_refresh_and_shutdown() {
-        let config = StreamConfig::default();
-        let (sender, _receiver) = mpsc::channel();
-        let mut manager = SubscriptionManager::new(config, sender).unwrap();
-
-        assert!(manager.refresh_subscriptions().is_ok());
-        assert!(manager.shutdown().is_ok());
-    }
-
-    #[test]
-    fn test_subscription_info() {
-        let config = StreamConfig::default();
-        let (sender, _receiver) = mpsc::channel();
-        let manager = SubscriptionManager::new(config, sender).unwrap();
-
-        let info = manager.get_subscription_info();
-        assert_eq!(info.len(), 0); // No subscriptions initially
-    }
-
-    #[test]
     fn test_callback_url_generation() {
         let config = StreamConfig::default();
         let (sender, _receiver) = mpsc::channel();
@@ -1572,74 +1229,6 @@ mod tests {
 
         assert!(callback_url.starts_with("http://127.0.0.1:"));
         assert!(callback_url.contains(&format!("/callback/{}", subscription_id)));
-    }
-
-    #[test]
-    fn test_subscription_statistics() {
-        let config = StreamConfig::default();
-        let (sender, _receiver) = mpsc::channel();
-        let manager = SubscriptionManager::new(config, sender).unwrap();
-
-        let stats = manager.get_statistics();
-        assert_eq!(stats.total_speakers, 0);
-        assert_eq!(stats.total_subscriptions, 0);
-        assert_eq!(stats.active_subscriptions, 0);
-        assert_eq!(stats.subscriptions_needing_renewal, 0);
-        assert!(stats.service_counts.is_empty());
-    }
-
-    #[test]
-    fn test_has_active_subscriptions() {
-        let config = StreamConfig::default();
-        let (sender, _receiver) = mpsc::channel();
-        let manager = SubscriptionManager::new(config, sender).unwrap();
-
-        let speaker = create_test_speaker("uuid:RINCON_123456789::1");
-        let speaker_id = speaker.get_id();
-
-        // Initially no active subscriptions
-        assert!(!manager.has_active_subscriptions(speaker_id));
-
-        // Add speaker (may fail due to network, but that's ok for this test)
-        let _ = manager.add_speaker(&speaker);
-
-        // The speaker should be tracked even if subscription creation failed
-        assert_eq!(manager.speaker_count(), 1);
-    }
-
-    #[test]
-    fn test_callback_server_port() {
-        let config = StreamConfig::default();
-        let (sender, _receiver) = mpsc::channel();
-        let manager = SubscriptionManager::new(config, sender).unwrap();
-
-        let port = manager.callback_server_port();
-        assert!(port.is_some());
-        let port = port.unwrap();
-        assert!(port >= 8080 && port <= 8090); // Default port range
-    }
-
-    #[test]
-    fn test_cleanup_inactive_subscriptions() {
-        let config = StreamConfig::default();
-        let (sender, _receiver) = mpsc::channel();
-        let manager = SubscriptionManager::new(config, sender).unwrap();
-
-        // Should not fail even with no subscriptions
-        let cleaned = manager.cleanup_inactive_subscriptions();
-        assert!(cleaned.is_ok());
-        assert_eq!(cleaned.unwrap(), 0);
-    }
-
-    #[test]
-    fn test_force_renewal_all() {
-        let config = StreamConfig::default();
-        let (sender, _receiver) = mpsc::channel();
-        let manager = SubscriptionManager::new(config, sender).unwrap();
-
-        // Should not fail even with no subscriptions
-        let result = manager.force_renewal_all();
-        assert!(result.is_ok());
     }
 
     #[test]
@@ -1660,62 +1249,7 @@ mod tests {
         let backoff_large = SubscriptionManager::calculate_backoff_duration(20, base_duration);
         assert_eq!(backoff_large, Duration::from_millis(30_000)); // Capped at 30 seconds
     }
-
-    #[test]
-    fn test_recover_failed_subscriptions() {
-        let config = StreamConfig::default();
-        let (sender, _receiver) = mpsc::channel();
-        let manager = SubscriptionManager::new(config, sender).unwrap();
-
-        // Should not fail even with no speakers
-        let result = manager.recover_failed_subscriptions();
-        assert!(result.is_ok());
-
-        let report = result.unwrap();
-        assert_eq!(report.total_attempts, 0);
-        assert_eq!(report.successful_recoveries, 0);
-        assert!(report.failed_recoveries.is_empty());
-    }
-
-    #[test]
-    fn test_check_speaker_connectivity() {
-        let config = StreamConfig::default();
-        let (sender, _receiver) = mpsc::channel();
-        let manager = SubscriptionManager::new(config, sender).unwrap();
-
-        let speaker = create_test_speaker("uuid:RINCON_123456789::1");
-        let speaker_id = speaker.get_id();
-
-        // Should return false for non-existent speaker
-        assert!(!manager.check_speaker_connectivity(speaker_id));
-
-        // Add speaker
-        let _ = manager.add_speaker(&speaker);
-
-        // Should return false for unreachable speaker (192.168.1.100 is likely not reachable in test)
-        assert!(!manager.check_speaker_connectivity(speaker_id));
-    }
-
-    #[test]
-    fn test_health_check_and_recover() {
-        let config = StreamConfig::default();
-        let (sender, _receiver) = mpsc::channel();
-        let manager = SubscriptionManager::new(config, sender).unwrap();
-
-        let result = manager.health_check_and_recover();
-        assert!(result.is_ok());
-
-        let report = result.unwrap();
-        assert_eq!(report.total_speakers, 0);
-        assert_eq!(report.reachable_speakers, 0);
-        assert_eq!(report.total_subscriptions, 0);
-        assert_eq!(report.active_subscriptions, 0);
-        assert!(!report.recovery_attempted);
-        assert!(report.recovery_report.is_none());
-    }
 }
-
-
 
 #[cfg(test)]
 mod network_tests {
