@@ -1,5 +1,5 @@
 use sonos::streaming::{EventStreamBuilder, ServiceType};
-use sonos::models::{Speaker, SpeakerId, StateChange, PlaybackState};
+use sonos::model::{Speaker, SpeakerId, StateChange, PlaybackState};
 use sonos::state::StateCache;
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use std::time::{Duration, Instant};

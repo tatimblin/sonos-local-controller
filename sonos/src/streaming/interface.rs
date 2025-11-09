@@ -1,5 +1,5 @@
 use super::subscription::SubscriptionError;
-use crate::models::SpeakerId;
+use crate::model::SpeakerId;
 use std::time::Duration;
 
 /// Simplified error type for the public streaming interface

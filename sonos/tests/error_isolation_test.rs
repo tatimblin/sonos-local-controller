@@ -1,7 +1,7 @@
 use sonos::{ServiceType, StateChange};
 use sonos::streaming::{SubscriptionScope};
 use sonos::streaming::subscription::SubscriptionError;
-use sonos::models::{Speaker, SpeakerId};
+use sonos::model::{Speaker, SpeakerId};
 use std::sync::mpsc;
 
 #[test]

@@ -1,6 +1,6 @@
 use super::subscription::{ServiceSubscription, SubscriptionError, SubscriptionResult};
 use super::types::{ServiceType, SubscriptionConfig, SubscriptionId, SubscriptionScope};
-use crate::models::{Speaker, SpeakerId, StateChange};
+use crate::model::{Speaker, SpeakerId, StateChange};
 use crate::service::rendering_control;
 use crate::transport::soap::SoapClient;
 use std::time::SystemTime;
@@ -314,7 +314,7 @@ impl ServiceSubscription for RenderingControlSubscription {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Speaker;
+    use crate::model::Speaker;
 
     fn create_test_speaker() -> Speaker {
         Speaker {

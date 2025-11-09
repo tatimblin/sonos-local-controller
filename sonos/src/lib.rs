@@ -1,5 +1,5 @@
 pub mod transport;
-pub mod models;
+pub mod model;
 pub mod error;
 pub mod api;
 pub mod state;
@@ -9,7 +9,7 @@ pub mod xml_decode;
 pub mod group;
 
 // Re-export key types for easier access
-pub use models::{Speaker, SpeakerId, GroupId, SpeakerState, PlaybackState, StateChange};
+pub use model::{Speaker, SpeakerId, GroupId, SpeakerState, PlaybackState, StateChange};
 pub use error::{SonosError, Result};
 pub use state::StateCache;
 pub use transport::discovery::{discover_speakers, discover_speakers_with_timeout};

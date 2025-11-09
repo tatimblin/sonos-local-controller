@@ -1,4 +1,4 @@
-use crate::models::{GroupId, PlaybackState, Speaker, SpeakerId, SpeakerState};
+use crate::model::{GroupId, PlaybackState, Speaker, SpeakerId, SpeakerState};
 use crate::group::Group;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};

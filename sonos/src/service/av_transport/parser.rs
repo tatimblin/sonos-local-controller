@@ -1,4 +1,4 @@
-use crate::{PlaybackState, models::TrackInfo, xml_decode::{NestedAttribute, ValueAttribute}};
+use crate::{PlaybackState, model::TrackInfo, xml_decode::{NestedAttribute, ValueAttribute}};
 
 use serde::Deserialize;
 
