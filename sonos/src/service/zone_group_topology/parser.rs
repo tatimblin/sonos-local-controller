@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+use crate::{GroupId, SpeakerId};
+
 #[derive(Debug, Deserialize)]
 #[serde(rename = "propertyset")]
 pub struct ZoneGroupTopologyParser {
@@ -41,9 +43,9 @@ pub struct ZoneGroups {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ZoneGroup {
     #[serde(rename = "@Coordinator")]
-    pub coordinator: String,
+    pub coordinator: SpeakerId,
     #[serde(rename = "@ID")]
-    pub id: String,
+    pub id: GroupId,
     #[serde(rename = "ZoneGroupMember", default)]
     pub zone_group_members: Vec<ZoneGroupMember>,
 }
@@ -51,7 +53,7 @@ pub struct ZoneGroup {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ZoneGroupMember {
     #[serde(rename = "@UUID")]
-    pub uuid: String,
+    pub uuid: SpeakerId,
     #[serde(rename = "@Location")]
     pub location: String,
     #[serde(rename = "@ZoneName")]
@@ -121,7 +123,7 @@ pub struct ZoneGroupMember {
 #[derive(Debug, Deserialize, Clone)]
 pub struct Satellite {
     #[serde(rename = "@UUID")]
-    pub uuid: String,
+    pub uuid: SpeakerId,
     #[serde(rename = "@Location")]
     pub location: String,
     #[serde(rename = "@ZoneName")]
@@ -222,8 +224,8 @@ mod tests {
         
         // Test the first zone group
         let first_zone = &zone_groups[0];
-        assert_eq!(first_zone.coordinator, "RINCON_5CAAFDAE58BD01400");
-        assert_eq!(first_zone.id, "RINCON_5CAAFDAE58BD01400:361632566");
+        assert_eq!(first_zone.coordinator, SpeakerId::new("RINCON_5CAAFDAE58BD01400"));
+        assert_eq!(first_zone.id, GroupId::new("RINCON_5CAAFDAE58BD01400:361632566"));
         assert_eq!(first_zone.zone_group_members.len(), 1);
         assert_eq!(first_zone.zone_group_members[0].zone_name, "Basement");
         assert_eq!(first_zone.zone_group_members[0].satellites.len(), 2);
@@ -250,8 +252,8 @@ mod tests {
         
         // Test the first zone group (Living Room + Kitchen + Roam/Office)
         let first_zone = &zone_groups[0];
-        assert_eq!(first_zone.coordinator, "RINCON_804AF2AA2FA201400");
-        assert_eq!(first_zone.id, "RINCON_C43875CA135801400:2858411502");
+        assert_eq!(first_zone.coordinator, SpeakerId::new("RINCON_804AF2AA2FA201400"));
+        assert_eq!(first_zone.id, GroupId::new("RINCON_C43875CA135801400:2858411502"));
         assert_eq!(first_zone.zone_group_members.len(), 3, "First zone should have 3 members");
         
         // Validate zone member names
@@ -261,7 +263,7 @@ mod tests {
         
         // Test the second zone group (Basement with satellites)
         let second_zone = &zone_groups[1];
-        assert_eq!(second_zone.coordinator, "RINCON_5CAAFDAE58BD01400");
+        assert_eq!(second_zone.coordinator, SpeakerId::new("RINCON_5CAAFDAE58BD01400"));
         assert_eq!(second_zone.zone_group_members[0].zone_name, "Basement");
         assert_eq!(second_zone.zone_group_members[0].satellites.len(), 2, "Basement should have 2 satellites");
         

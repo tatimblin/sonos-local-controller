@@ -369,7 +369,7 @@ impl EventStreamBuilder {
                 speaker.name, speaker.ip_address, speaker.port
             );
 
-            match subscription_manager.add_speaker(speaker.clone()) {
+            match subscription_manager.add_speaker(&speaker) {
                 Ok(()) => {
                     println!("✅ Successfully set up subscriptions for {}", speaker.name);
                     successful_speakers += 1;
@@ -676,7 +676,7 @@ impl ActiveEventStream {
                     // Call speaker disconnected handler for connection-related failures (non-blocking callback)
                     if let Some(ref handler) = handlers.on_speaker_disconnected {
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            handler(*speaker_id);
+                            handler(speaker_id.clone());
                         }));
                         if let Err(_) = result {
                             log::error!("Speaker disconnected handler panicked");
@@ -737,17 +737,7 @@ impl ActiveEventStream {
                 // when a speaker transitions from disconnected to connected state.
             }
 
-            StateChange::SpeakerJoinedGroup { speaker_id, .. }
-            | StateChange::SpeakerLeftGroup { speaker_id, .. } => {
-                // Individual group membership changes indicate speaker connectivity (non-blocking log only)
-                log::debug!(
-                    "Speaker {:?} group membership changed, indicating connectivity",
-                    speaker_id
-                );
-            }
-            StateChange::CoordinatorChanged { .. }
-            | StateChange::GroupFormed { .. }
-            | StateChange::GroupDissolved { .. } => {
+            StateChange::GroupChange { .. } => {
                 // Group structure changes indicate network-wide connectivity (non-blocking log only)
                 log::debug!("Group structure changed, indicating network connectivity");
             }
@@ -836,7 +826,7 @@ impl ActiveEventStream {
     /// stream.add_speaker(new_speaker)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn add_speaker(&self, speaker: Speaker) -> Result<(), StreamError> {
+    pub fn add_speaker(&self, speaker: &Speaker) -> Result<(), StreamError> {
         self.subscription_manager
             .add_speaker(speaker)
             .map_err(StreamError::from)
@@ -867,7 +857,7 @@ impl ActiveEventStream {
     /// stream.remove_speaker(speaker_id)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn remove_speaker(&self, speaker_id: SpeakerId) -> Result<(), StreamError> {
+    pub fn remove_speaker(&self, speaker_id: &SpeakerId) -> Result<(), StreamError> {
         self.subscription_manager
             .remove_speaker(speaker_id)
             .map_err(StreamError::from)
@@ -965,8 +955,7 @@ mod tests {
 
     fn create_test_speaker(id: &str, name: &str) -> Speaker {
         Speaker {
-            id: SpeakerId::from_udn(id),
-            udn: id.to_string(),
+            id: SpeakerId::new(id),
             name: name.to_string(),
             room_name: name.to_string(),
             ip_address: "192.168.1.100".to_string(),

@@ -1,5 +1,5 @@
 use sonos::{
-    discover_speakers_with_timeout, get_zone_groups_from_speaker, streaming::EventStreamBuilder,
+    discover_speakers_with_timeout, streaming::EventStreamBuilder,
     PlaybackState, SonosError, SpeakerState, StateCache,
 };
 use std::io::{self, Write};
@@ -22,15 +22,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Found {} speakers", speakers.len());
 
-    // Get zone groups
-    let groups = get_zone_groups_from_speaker(&speakers[0]).unwrap_or_else(|e| {
-        println!("Warning: Failed to fetch groups: {:?}", e);
-        vec![]
-    });
-
     // Initialize state cache
     let state_cache = Arc::new(StateCache::new());
-    state_cache.initialize(speakers.clone(), groups);
+    state_cache.initialize(speakers.clone(), vec![]);
 
     // Setup event streaming with new simplified interface
     println!("Using all {} speakers for monitoring", speakers.len());
@@ -115,7 +109,7 @@ fn display_topology_with_stats(
 }
 
 fn display_topology(state_cache: &Arc<StateCache>) {
-    let groups = state_cache.get_all_groups();
+    let groups = state_cache.get_groups();
     let all_speakers = state_cache.get_all_speakers();
 
     if groups.is_empty() {
@@ -126,31 +120,31 @@ fn display_topology(state_cache: &Arc<StateCache>) {
 
     println!("📊 Topology ({} groups):", groups.len());
 
-    for (i, group) in groups.iter().enumerate() {
-        let group_speakers = state_cache.get_speakers_in_group(group.id);
+    for (i, (group_id, _)) in groups.iter().enumerate() {
+      let group_speakers = state_cache.get_speaker_states_by_group_id(group_id);
 
         if group_speakers.len() > 1 {
             println!("├─ 🏠 Group {} ({} speakers)", i + 1, group_speakers.len());
-            for (j, speaker) in group_speakers.iter().enumerate() {
+            for (j, speaker_state) in group_speakers.iter().enumerate() {
                 let is_last = j == group_speakers.len() - 1;
                 let prefix = if is_last { "└─" } else { "├─" };
-                let role = if speaker.is_coordinator { " 👑" } else { "" };
+                let role = if speaker_state.is_coordinator { " 👑" } else { "" };
 
                 println!(
                     "│  {} 🔊 {}{} - {} - {}",
                     prefix,
-                    speaker.speaker.room_name,
+                    speaker_state.speaker.room_name,
                     role,
-                    format_playback_state(speaker.playback_state),
-                    format_volume(speaker.volume, speaker.muted)
+                    format_playback_state(speaker_state.playback_state),
+                    format_volume(speaker_state.volume, speaker_state.muted)
                 );
             }
-        } else if let Some(speaker) = group_speakers.first() {
+        } else if let Some(speaker_state) = group_speakers.first() {
             println!(
                 "├─ 🔊 {} (Solo) - {} - {}",
-                speaker.speaker.room_name,
-                format_playback_state(speaker.playback_state),
-                format_volume(speaker.volume, speaker.muted)
+                speaker_state.speaker.room_name,
+                format_playback_state(speaker_state.playback_state),
+                format_volume(speaker_state.volume, speaker_state.muted)
             );
         }
     }

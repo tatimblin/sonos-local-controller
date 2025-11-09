@@ -144,6 +144,8 @@ pub fn discover_speakers_with_timeout(timeout: Duration) -> Result<Vec<Speaker>>
 
 #[cfg(test)]
 mod tests {
+    use crate::SpeakerId;
+
     use super::*;
     
 
@@ -160,7 +162,7 @@ mod tests {
         assert_eq!(speaker.room_name, "Living Room");
         assert_eq!(speaker.model_name, "Sonos One");
         assert_eq!(speaker.ip_address, "192.168.1.100");
-        assert_eq!(speaker.udn, "uuid:RINCON_000E58A0123456");
+        assert_eq!(speaker.id, SpeakerId::new("uuid:RINCON_000E58A0123456"));
         assert_eq!(speaker.port, 1400);
     }
 
@@ -269,7 +271,7 @@ mod tests {
         assert_eq!(speaker.room_name, "Unknown"); // Should default to "Unknown"
         assert_eq!(speaker.model_name, "Sonos Test");
         assert_eq!(speaker.ip_address, "192.168.1.200");
-        assert_eq!(speaker.udn, "uuid:RINCON_MINIMAL123456");
+        assert_eq!(speaker.id, SpeakerId::new("uuid:RINCON_MINIMAL123456"));
     }
 
     #[test]

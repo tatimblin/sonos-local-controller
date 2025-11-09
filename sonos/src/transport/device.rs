@@ -22,7 +22,7 @@ pub struct Device {
   pub model_url: Option<String>,
   pub serial_number: Option<String>,
   #[serde(rename = "UDN")]
-  pub udn: String,
+  pub udn: SpeakerId,
   pub room_name: Option<String>,
   pub display_name: Option<String>,
 }
@@ -38,11 +38,8 @@ impl Device {
 
   /// Convert device to Speaker model with IP address
   pub fn to_speaker(&self, ip_address: String) -> Speaker {
-    let id = SpeakerId::from_udn(&self.udn);
-
     Speaker {
-      id,
-      udn: self.udn.clone(),
+      id: self.udn.clone(),
       name: self.friendly_name.clone(),
       room_name: self
         .room_name
@@ -98,7 +95,7 @@ mod tests {
     assert_eq!(device.friendly_name, "Living Room");
     assert_eq!(device.manufacturer, "Sonos, Inc.");
     assert_eq!(device.model_name, "Sonos One");
-    assert_eq!(device.udn, "uuid:RINCON_000E58A0123456");
+    assert_eq!(device.udn, SpeakerId::new("uuid:RINCON_000E58A0123456"));
     assert_eq!(device.room_name, Some("Living Room".to_string()));
     assert!(device.is_sonos_speaker());
   }

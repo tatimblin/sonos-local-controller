@@ -201,8 +201,8 @@ impl ServiceSubscription for RenderingControlSubscription {
         SubscriptionScope::PerSpeaker
     }
 
-    fn speaker_id(&self) -> SpeakerId {
-        self.speaker.id
+    fn speaker_id(&self) -> &SpeakerId {
+        &self.speaker.id
     }
 
     fn subscribe(&mut self) -> SubscriptionResult<SubscriptionId> {
@@ -258,7 +258,7 @@ impl ServiceSubscription for RenderingControlSubscription {
           Ok(parser) => {
             match parser.get_volume() {
               Some(volume) => changes.push(StateChange::VolumeChanged {
-                speaker_id: self.speaker_id(),
+                speaker_id: self.speaker_id().clone(),
                 volume
               }),
               None => {}
@@ -266,7 +266,7 @@ impl ServiceSubscription for RenderingControlSubscription {
 
             match parser.get_mute() {
               Some(mute) => changes.push(StateChange::MuteChanged {
-                speaker_id: self.speaker_id(),
+                speaker_id: self.speaker_id().clone(),
                 muted: mute
               }),
               None => {}
@@ -318,8 +318,7 @@ mod tests {
 
     fn create_test_speaker() -> Speaker {
         Speaker {
-            id: SpeakerId::from_udn("uuid:RINCON_123456789::1"),
-            udn: "uuid:RINCON_123456789::1".to_string(),
+            id: SpeakerId::new("uuid:RINCON_123456789::1"),
             name: "Test Speaker".to_string(),
             room_name: "Test Room".to_string(),
             ip_address: "192.168.1.100".to_string(),
@@ -341,7 +340,7 @@ mod tests {
 
         let sub = subscription.unwrap();
         assert_eq!(sub.service_type(), ServiceType::RenderingControl);
-        assert_eq!(sub.speaker_id(), speaker.id);
+        assert_eq!(sub.speaker_id(), speaker.get_id());
         assert_eq!(sub.callback_url(), &callback_url);
         assert!(!sub.is_active());
         assert!(sub.subscription_id().is_none());
@@ -456,7 +455,7 @@ mod tests {
 
         // Test trait methods before subscription
         assert_eq!(subscription.service_type(), ServiceType::RenderingControl);
-        assert_eq!(subscription.speaker_id(), speaker.id);
+        assert_eq!(subscription.speaker_id(), speaker.get_id());
         assert_eq!(subscription.callback_url(), &callback_url);
         assert!(!subscription.is_active());
         assert!(subscription.subscription_id().is_none());

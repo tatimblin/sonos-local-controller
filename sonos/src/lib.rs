@@ -6,11 +6,11 @@ pub mod state;
 pub mod streaming;
 pub mod service;
 pub mod xml_decode;
+pub mod group;
 
 // Re-export key types for easier access
-pub use models::{Speaker, Group, SpeakerId, GroupId, SpeakerState, PlaybackState, StateChange};
+pub use models::{Speaker, SpeakerId, GroupId, SpeakerState, PlaybackState, StateChange};
 pub use error::{SonosError, Result};
-pub use api::zone_groups::{ZoneGroupsService, get_zone_groups_from_speaker, get_zone_groups_from_speaker_with_timeout};
 pub use state::StateCache;
 pub use transport::discovery::{discover_speakers, discover_speakers_with_timeout};
 pub use streaming::{EventStreamBuilder, ActiveEventStream, ServiceType, StreamError, LifecycleHandlers, StreamStats};

@@ -86,7 +86,7 @@ pub trait ServiceSubscription: Send + Sync {
     }
 
     /// Get the speaker ID this subscription is associated with
-    fn speaker_id(&self) -> SpeakerId;
+    fn speaker_id(&self) -> &SpeakerId;
 
     /// Establish a new UPnP subscription with the device
     ///
@@ -217,8 +217,8 @@ mod tests {
             SubscriptionScope::PerSpeaker
         }
 
-        fn speaker_id(&self) -> SpeakerId {
-            self.speaker_id
+        fn speaker_id(&self) -> &SpeakerId {
+            &self.speaker_id
         }
 
         fn subscribe(&mut self) -> SubscriptionResult<SubscriptionId> {
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn test_subscription_lifecycle() {
-        let speaker_id = SpeakerId::from_udn("uuid:RINCON_123456789::1");
+        let speaker_id = SpeakerId::new("uuid:RINCON_123456789::1");
         let mut subscription = MockSubscription::new(
             ServiceType::AVTransport,
             speaker_id,
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn test_needs_renewal() {
-        let speaker_id = SpeakerId::from_udn("uuid:RINCON_123456789::1");
+        let speaker_id = SpeakerId::new("uuid:RINCON_123456789::1");
         let mut subscription = MockSubscription::new(
             ServiceType::AVTransport,
             speaker_id,
