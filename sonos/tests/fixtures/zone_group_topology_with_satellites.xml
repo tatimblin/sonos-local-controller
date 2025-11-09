@@ -1,0 +1,7 @@
+<ZoneGroupState>
+  <ZoneGroups>
+    <ZoneGroup Coordinator="RINCON_123456789" ID="RINCON_123456789:1">
+      <ZoneGroupMember UUID="RINCON_123456789" Location="http://192.168.1.100:1400/xml/device_description.xml" ZoneName="Living Room" Icon="x-rincon-roomicon:living" Configuration="1" SoftwareVersion="85.0-64200"><Satellite UUID="RINCON_SAT001" Location="http://192.168.1.103:1400/xml/device_description.xml" ZoneName="Living Room" Icon="" Configuration="1" Invisible="1" SoftwareVersion="85.0-64200" /><Satellite UUID="RINCON_SAT002" Location="http://192.168.1.104:1400/xml/device_description.xml" ZoneName="Living Room" Icon="" Configuration="1" Invisible="1" SoftwareVersion="85.0-64200" /></ZoneGroupMember>
+    </ZoneGroup>
+  </ZoneGroups>
+</ZoneGroupState>

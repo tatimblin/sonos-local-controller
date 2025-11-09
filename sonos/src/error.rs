@@ -1,30 +1,26 @@
-use std::fmt;
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum SonosError {
-  ParseError(String),
-  DeviceUnreachable,
-  BadResponse(u16),
+  CommunicationError(String),
   DeviceNotFound(String),
-  NetworkTimeout,
-  NetworkError(String),
-  InvalidVolume(u8),
-  NotCoordinator(String)
+  DiscoveryFailed(String),
+  InvalidState(String),
+  ParseError(String),
+  SoapFault(String),
 }
 
-impl fmt::Display for SonosError {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    match self {
-      SonosError::ParseError(msg) => write!(f, "Failed to parse Sonos response XML ({})", msg),
-      SonosError::DeviceUnreachable => write!(f, "Failed to call Sonos endpoint"),
-      SonosError::BadResponse(code) => write!(f, "Received a non-success ({}) response from Sonos", code),
-      SonosError::DeviceNotFound(identifier) => write!(f, "Couldn't find a device by the given identifier ({})", identifier),
-      SonosError::NetworkTimeout => write!(f, "Network request timed out"),
-      SonosError::NetworkError(msg) => write!(f, "Network error: {}", msg),
-      SonosError::InvalidVolume(volume) => write!(f, "Invalid volume level: {} (must be 0-100)", volume),
-      SonosError::NotCoordinator(ip) => write!(f, "Device ({}) is not the zone coordinator", ip)
+impl std::fmt::Display for SonosError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SonosError::CommunicationError(msg) => write!(f, "Communication error: {}", msg),
+            SonosError::DeviceNotFound(msg) => write!(f, "Device not found: {}", msg),
+            SonosError::DiscoveryFailed(msg) => write!(f, "Discovery failed: {}", msg),
+            SonosError::InvalidState(msg) => write!(f, "Invalid state: {}", msg),
+            SonosError::ParseError(msg) => write!(f, "Parse error: {}", msg),
+            SonosError::SoapFault(msg) => write!(f, "SOAP fault: {}", msg),
+        }
     }
-  }
 }
 
 impl std::error::Error for SonosError {}
+
+pub type Result<T> = std::result::Result<T, SonosError>;

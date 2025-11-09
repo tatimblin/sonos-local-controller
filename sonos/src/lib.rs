@@ -1,26 +1,16 @@
-mod model;
-pub use model::PlayState;
+pub mod transport;
+pub mod models;
+pub mod error;
+pub mod api;
+pub mod state;
+pub mod streaming;
+pub mod service;
+pub mod xml_decode;
+pub mod group;
 
-pub mod topology;
-pub use topology::{Topology, ZoneGroup, ZoneGroupMember, Satellite, VanishedDevices, VanishedDevice};
-
-mod client;
-pub use client::Client;
-
-mod discover;
-pub use discover::{discover_speakers_iter, discover_speakers, discover_topology};
-
-pub mod speaker;
-pub use speaker::{SpeakerController, SpeakerInfo};
-
-mod util;
-pub use util::ssdp;
-
-mod error;
-pub use error::SonosError;
-
-//// #[cfg(feature = "mock")]
-// pub mod testing {
-//   pub use crate::speaker::mock::MockSpeaker;
-//   pub use crate::speaker::mock::MockSpeakerBuilder;
-// }
+// Re-export key types for easier access
+pub use models::{Speaker, SpeakerId, GroupId, SpeakerState, PlaybackState, StateChange};
+pub use error::{SonosError, Result};
+pub use state::StateCache;
+pub use transport::discovery::{discover_speakers, discover_speakers_with_timeout};
+pub use streaming::{EventStreamBuilder, ActiveEventStream, ServiceType, StreamError, LifecycleHandlers, StreamStats};

@@ -1,0 +1,197 @@
+use sonos::{
+    discover_speakers_with_timeout, streaming::EventStreamBuilder,
+    PlaybackState, SonosError, SpeakerState, StateCache,
+};
+use std::io::{self, Write};
+use std::sync::Arc;
+use std::time::Duration;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🎵 Sonos Topology Monitor - Event-Driven Visualization");
+    println!("Discovering speakers...");
+
+    // Discover speakers
+    let speakers = match discover_speakers_with_timeout(Duration::from_secs(2)) {
+        Ok(speakers) if !speakers.is_empty() => speakers,
+        Ok(_) | Err(SonosError::DiscoveryFailed(_)) => {
+            println!("No Sonos speakers found on the network.");
+            return Ok(());
+        }
+        Err(e) => return Err(Box::new(e)),
+    };
+
+    println!("Found {} speakers", speakers.len());
+
+    // Initialize state cache
+    let state_cache = Arc::new(StateCache::new());
+    state_cache.initialize(speakers.clone(), vec![]);
+
+    // Setup event streaming with new simplified interface
+    println!("Using all {} speakers for monitoring", speakers.len());
+    
+    match EventStreamBuilder::new(speakers) {
+        Ok(builder) => {
+            // Create shared state for tracking events
+            let event_count = Arc::new(std::sync::atomic::AtomicU32::new(0));
+            let start_time = std::time::Instant::now();
+
+            // Remove unused variable
+            let event_count_for_handler = event_count.clone();
+
+            println!("🚀 Starting event stream builder...");
+            match builder
+                .with_state_cache(state_cache.clone())
+                .with_event_handler(move |_event| {
+                    // Just increment event count - avoid blocking I/O in event handler
+                    let _count = event_count_for_handler
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        + 1;
+                    // Note: Display updates will be handled by the main loop
+                })
+                .start()
+            {
+                Ok(_stream) => {
+                    println!("✅ Event streaming active - monitoring topology changes\n");
+
+                    // Display initial topology
+                    display_topology_with_stats(&state_cache, 0, start_time)?;
+
+                    println!("⏳ Waiting for topology changes...");
+                    println!("   Try playing/pausing music or grouping speakers\n");
+
+                    // Keep the stream alive and periodically update display
+                    loop {
+                        std::thread::sleep(Duration::from_secs(1));
+                        
+                        // Update display every second with current event count
+                        let current_count = event_count.load(std::sync::atomic::Ordering::Relaxed);
+                        let _ = display_topology_with_stats(&state_cache, current_count, start_time);
+                    }
+                }
+                Err(e) => {
+                    println!("⚠️  Streaming failed: {:?}", e);
+                    println!("Displaying static topology...\n");
+                    display_topology(&state_cache);
+                }
+            }
+        }
+        Err(e) => {
+            println!("⚠️  Failed to create event stream: {:?}", e);
+            println!("Displaying static topology...\n");
+            display_topology(&state_cache);
+        }
+    }
+
+    Ok(())
+}
+
+fn display_topology_with_stats(
+    state_cache: &Arc<StateCache>,
+    event_count: u32,
+    start_time: std::time::Instant,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Clear screen
+    print!("\x1B[2J\x1B[H");
+    io::stdout().flush()?;
+
+    println!("🎵 Sonos Topology Monitor - LIVE");
+    println!(
+        "Events: {} | Runtime: {:.1}s | Press Ctrl+C to exit",
+        event_count,
+        start_time.elapsed().as_secs_f32()
+    );
+    println!("═══════════════════════════════════════════════════");
+
+    display_topology(state_cache);
+
+    println!("\n💡 Tip: Play/pause music or group speakers to see updates!");
+    Ok(())
+}
+
+fn display_topology(state_cache: &Arc<StateCache>) {
+    let groups = state_cache.get_groups();
+    let all_speakers = state_cache.get_all_speakers();
+
+    if groups.is_empty() {
+        println!("📊 No groups found");
+        display_all_speakers(&all_speakers);
+        return;
+    }
+
+    println!("📊 Topology ({} groups):", groups.len());
+
+    for (i, (group_id, _)) in groups.iter().enumerate() {
+      let group_speakers = state_cache.get_speaker_states_by_group_id(group_id);
+
+        if group_speakers.len() > 1 {
+            println!("├─ 🏠 Group {} ({} speakers)", i + 1, group_speakers.len());
+            for (j, speaker_state) in group_speakers.iter().enumerate() {
+                let is_last = j == group_speakers.len() - 1;
+                let prefix = if is_last { "└─" } else { "├─" };
+                let role = if speaker_state.is_coordinator { " 👑" } else { "" };
+
+                println!(
+                    "│  {} 🔊 {}{} - {} - {}",
+                    prefix,
+                    speaker_state.speaker.room_name,
+                    role,
+                    format_playback_state(speaker_state.playback_state),
+                    format_volume(speaker_state.volume, speaker_state.muted)
+                );
+            }
+        } else if let Some(speaker_state) = group_speakers.first() {
+            println!(
+                "├─ 🔊 {} (Solo) - {} - {}",
+                speaker_state.speaker.room_name,
+                format_playback_state(speaker_state.playback_state),
+                format_volume(speaker_state.volume, speaker_state.muted)
+            );
+        }
+    }
+
+    // Summary
+    let playing_count = all_speakers
+        .iter()
+        .filter(|s| s.playback_state == PlaybackState::Playing)
+        .count();
+
+    println!(
+        "\n📈 Summary: {} speakers, {} playing",
+        all_speakers.len(),
+        playing_count
+    );
+}
+
+fn display_all_speakers(speakers: &[SpeakerState]) {
+    println!("🔊 All Speakers:");
+    for speaker in speakers {
+        println!(
+            "├─ {} - {} - {}",
+            speaker.speaker.room_name,
+            format_playback_state(speaker.playback_state),
+            format_volume(speaker.volume, speaker.muted)
+        );
+    }
+}
+
+fn format_playback_state(state: PlaybackState) -> String {
+    match state {
+        PlaybackState::Playing => "▶️ Playing".to_string(),
+        PlaybackState::Paused => "⏸️ Paused".to_string(),
+        PlaybackState::Stopped => "⏹️ Stopped".to_string(),
+        PlaybackState::Transitioning => "🔄 Transitioning".to_string(),
+    }
+}
+
+fn format_volume(volume: u8, muted: bool) -> String {
+    if muted {
+        format!("🔇 {}%", volume)
+    } else {
+        let icon = match volume {
+            0 => "🔈",
+            1..=33 => "🔉",
+            _ => "🔊",
+        };
+        format!("{} {}%", icon, volume)
+    }
+}
