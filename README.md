@@ -1,3 +1,5 @@
+__!! Deprecated 2025.11.30: See [sonos-cli](https://github.com/tatimblin/sonos-cli) or [sonos-sdk](https://github.com/tatimblin/sonos-sdk) for future development !!__
+
 # Sonos Local Controller
 
 A Rust library and CLI application for discovering and controlling Sonos speakers on your local network.
